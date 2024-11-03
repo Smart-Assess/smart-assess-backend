@@ -7,55 +7,39 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v2
+    - uses: actions/checkout@v2
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: "YOUR_STATIC_AWS_ACCESS_KEY_ID"
-          aws-secret-access-key: "YOUR_STATIC_AWS_SECRET_ACCESS_KEY"
-          aws-region: "us-east-1"
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v1
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build, tag, and push image to Amazon ECR
-        run: |
-          # Define the static ECR registry and repository names
-          ECR_REGISTRY="307946655606.dkr.ecr.us-east-1.amazonaws.com"
-          ECR_REPOSITORY="smartassess"
-          IMAGE_TAG="latest" # You can also set this to ${{ github.sha }} for unique images
 
-          # Build the Docker image
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+    - name: Build, tag, and push image to Amazon ECR
+      env:
+        ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        ECR_REPOSITORY: smartassess
+        IMAGE_TAG: latest
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-          # Push the image to ECR
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-      - name: Deploy to EC2
-        run: |
-          # Define static values for EC2 deployment
-          PRIVATE_KEY="YOUR_STATIC_EC2_PRIVATE_KEY_CONTENT"
-          HOST="YOUR_STATIC_EC2_HOST"
-          USER="YOUR_STATIC_EC2_USERNAME" # E.g., ec2-user for Amazon Linux or ubuntu for Ubuntu
-
-          # Save the private key file and set correct permissions
-          echo "$PRIVATE_KEY" > private_key && chmod 600 private_key
-
-          # SSH into EC2 instance and deploy the Docker container
-          ssh -o StrictHostKeyChecking=no -i private_key ${USER}@${HOST} '
-            # Login to ECR from within the EC2 instance
-            aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 307946655606.dkr.ecr.us-east-1.amazonaws.com
-
-            # Pull the latest image from ECR
-            docker pull 307946655606.dkr.ecr.us-east-1.amazonaws.com/smartassess:latest
-
-            # Stop and remove any existing container if running
-            docker stop fastapi-app || true
-            docker rm fastapi-app || true
-
-            # Run the new container with the latest image
-            docker run -d --name fastapi-app -p 8000:8000 307946655606.dkr.ecr.us-east-1.amazonaws.com/smartassess:latest
-          '
+    - name: Deploy to EC2
+      env:
+        PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+        HOST: ${{ secrets.EC2_HOST }}
+        USER: ${{ secrets.EC2_USER }}
+      run: |
+        echo "$PRIVATE_KEY" > private_key && chmod 400 private_key
+        ssh -o StrictHostKeyChecking=no -i private_key ${USER}@${HOST} '
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+          sudo docker pull ${{ steps.login-ecr.outputs.registry }}/smartassess:latest
+          sudo docker run -d --name fastapi-app -p 8000:8000 ${{ steps.login-ecr.outputs.registry }}/smartassess:latest
+        '
