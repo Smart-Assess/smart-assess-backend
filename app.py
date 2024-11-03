@@ -1,0 +1,26 @@
+# >> Import necessary modules and packages from FastAPI and other libraries
+# from apis.superadmin import router as superadmin_route
+from apis.auth import router as token
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+
+app = FastAPI()
+
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(token)
+# app.include_router(superadmin_route)
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8000)
