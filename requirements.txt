@@ -16,3 +16,4 @@ psycopg2-binary
 sqlalchemy==2.0.36
 python-jose==3.3.0
 python-multipart
+boto3
