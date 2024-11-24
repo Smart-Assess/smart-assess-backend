@@ -1,33 +1,25 @@
-import random
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from models.models import SuperAdmin
 from utils.dependencies import get_db
-from utils.security import create_access_token, verify_password, get_password_hash, SECRET_KEY, ALGORITHM
+from utils.security import create_access_token, verify_password, SECRET_KEY, ALGORITHM
 from datetime import timedelta, datetime
-from models.pydantic_model import OAuth2EmailRequestForm
+from jose import jwt, JWTError
 
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-# from jose import jwt, JWTError
-from fastapi import (
-    Depends,
-    HTTPException,
-    status,
-)
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 router = APIRouter()
-
 
 @router.post("/login", response_model=dict)
 async def login_for_access_token(
-    form_data: OAuth2EmailRequestForm = Depends(), db: Session = Depends(get_db)
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
 ):
     user = None
     role = None
     user_data = {}
 
-    user = authenticate_super_admin(db, form_data.email, form_data.password)
+    user = authenticate_super_admin(db, form_data.username, form_data.password)
     if user:
         role = "superadmin"
         user_data = {
@@ -38,9 +30,18 @@ async def login_for_access_token(
         }
 
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    access_token = create_access_token(data={"sub": str(user.id)}, role=role)
+    access_token = create_access_token(
+        data={
+            "sub": str(user.id)
+            },
+        role=role,
+    )
 
     return {
         "access_token": access_token,
@@ -50,17 +51,16 @@ async def login_for_access_token(
         "user": user_data,
     }
 
-    
-
 def authenticate_super_admin(db: Session, email: str, password: str):
-    admin = db.query(SuperAdmin).filter(SuperAdmin.email == email.strip()).first()
+    admin = db.query(SuperAdmin).filter(
+        SuperAdmin.email == email.strip()).first()
     if admin and verify_password(password, admin.password):
         return admin
     return None
 
-
 async def get_current_admin(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
 ):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -71,8 +71,11 @@ async def get_current_admin(
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         admin_id: str = payload.get("sub")
-        if admin_id is None:
+        role: str = payload.get("role")
+
+        if admin_id is None or role != "superadmin":
             raise credentials_exception
+
     except JWTError:
         raise credentials_exception
 

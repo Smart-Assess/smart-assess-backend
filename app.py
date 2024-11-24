@@ -18,7 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(token)
-app.include_router(superadmin, prefix="/superadmin", tags=["superadmin"])
+app.include_router(superadmin)
 
 if __name__ == "__main__":
     import uvicorn
