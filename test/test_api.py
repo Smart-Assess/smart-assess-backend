@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
 
 #################################
-#use me in emergancy
+#use me in emergency
 #################################
 # from sqlalchemy import create_engine, MetaData, text
 # from sqlalchemy.orm import sessionmaker

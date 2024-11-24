@@ -15,7 +15,7 @@ from fastapi import (
     status,
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 router = APIRouter()
 
 
@@ -57,3 +57,26 @@ def authenticate_super_admin(db: Session, email: str, password: str):
     if admin and verify_password(password, admin.password):
         return admin
     return None
+
+
+async def get_current_admin(
+    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        admin_id: str = payload.get("sub")
+        if admin_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    admin = db.query(SuperAdmin).filter(SuperAdmin.id == admin_id).first()
+    if admin is None:
+        raise credentials_exception
+    return admin

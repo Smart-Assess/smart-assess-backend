@@ -1,5 +1,5 @@
 # >> Import necessary modules and packages from FastAPI and other libraries
-# from apis.superadmin import router as superadmin_route
+from apis.superadmin import router as superadmin
 from apis.auth import router as token
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(token)
-# app.include_router(superadmin_route)
+app.include_router(superadmin, prefix="/superadmin", tags=["superadmin"])
 
 if __name__ == "__main__":
     import uvicorn
