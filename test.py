@@ -43,6 +43,7 @@
 #     if connection:
 #         connection.close()
 
+
 # import re
 import re
 from spacy.cli import download
@@ -102,3 +103,203 @@ Strategic Project Management (SPM) focuses on aligning projects with an organiza
 scores = scorer.score(references=[cleaned_text], candidates=[answer], batch_size=32)
 print(scores)
 
+import requests
+from pathlib import Path
+
+# Base URL of your FastAPI application
+BASE_URL = "http://localhost:8000"
+
+# def test_add_university():
+#     # Step 1: Get authentication token
+#     login_data = {
+#         'grant_type': 'password',
+#         'username': 'abdulsamadsid1@gmail.com',
+#         'password': '12345',
+#         'scope': '',
+#         'client_id': '',
+#         'client_secret': ''
+#     }
+    
+#     headers = {
+#         'accept': 'application/json',
+#         'Content-Type': 'application/x-www-form-urlencoded'
+#     }
+
+#     login_response = requests.post(
+#         f"{BASE_URL}/login",
+#         data=login_data,
+#         headers=headers
+#     )
+    
+#     # Extract token
+#     print("Login Response:", login_response.text)
+#     token = login_response.json()["access_token"]
+    
+    
+#     # Step 2: Prepare headers with token
+#     headers = {
+#         "Authorization": f"Bearer {token}"
+#     }
+    
+#     # Step 3: Prepare university data
+#     # university_data = {
+#     #     "university_name": "Test University",
+#     #     "university_email": "test@university.com",
+#     #     "phone_number": "1234567890",
+#     #     "street_address": "123 Test Street",
+#     #     "city": "Test City",
+#     #     "state": "Test State",
+#     #     "zipcode": "12345",
+#     #     "admin_name": "Test Admin",
+#     #     "admin_email": "admin1@test.com",
+#     #     "admin_password": "admin123"
+#     # }
+    
+#     # # Optional: Prepare image file if needed
+#     # files = None
+#     # if Path("university_logo.png").exists():
+#     #     files = {
+#     #         "image": ("university_logo.png", open("university_logo.png", "rb"), "image/png")
+#     #     }
+    
+#     # Step 4: Make request to create university
+#     response = requests.get(
+#         f"{BASE_URL}/superadmin/universities",
+#         # data=university_data,
+#         headers=headers,
+#         # files=files
+#     )
+    
+#     # Step 5: Print response
+#     print("Status Code:", response.status_code)
+#     print("Response:", response.text)
+    
+#     # Step 6: Clean up if file was opened
+#     # if files:
+#     #     files["image"][1].close()
+
+# def test_add_student():
+#     # Step 1: Get authentication token
+#     login_data = {
+#         'grant_type': 'password',
+#         'username': 'admin1@test.com',  # Replace with the admin's login credentials
+#         'password': 'admin123',
+#         'scope': '',
+#         'client_id': '',
+#         'client_secret': ''
+#     }
+    
+#     headers = {
+#         'accept': 'application/json',
+#         'Content-Type': 'application/x-www-form-urlencoded'
+#     }
+
+#     login_response = requests.post(
+#         f"{BASE_URL}/login",  # Replace with the actual login endpoint
+#         data=login_data,
+#         headers=headers
+#     )
+    
+#     # Extract token
+#     print("Login Response:", login_response.text)
+#     if login_response.status_code != 200:
+#         print("Login failed!")
+#         return
+#     token = login_response.json()["access_token"]
+    
+#     # Step 2: Prepare headers with token
+#     headers = {
+#         "Authorization": f"Bearer {token}",
+#         'accept': 'application/json',
+#         'Content-Type': 'application/x-www-form-urlencoded',
+#     }
+
+#     # Step 3: Prepare student data
+#     student_data = {
+#         "full_name": "Ahsan Sajid",
+#         "student_id": '21B-003-SE',
+#         "department": "Computer Science",
+#         "email": "21b-003-se@students.uit.edu",
+#         "batch": "21B",
+#         "section": "B",
+#         "password": "12345"
+#     }
+#     files = None
+#     if Path("pfp.jpg").exists():
+#         files = {
+#             "image": ("pfp.jpg", open("pfp.jpg", "rb"), "image/png")
+#         }
+#     # Step 4: Make a POST request to add a student
+#     response = requests.post(
+#         f"{BASE_URL}/universityadmin/student",
+#         headers=headers,
+#         data=student_data  # Send form data
+#     )
+    
+#     # Step 5: Print response
+#     print("Status Code:", response.status_code)
+#     print("Response:", response.text)
+def test_add_teacher():
+    # Step 1: Get authentication token
+    login_data = {
+        'grant_type': 'password',
+        'username': 'admin1@test.com',  # Replace with the admin's login credentials
+        'password': 'admin123',
+        'scope': '',
+        'client_id': '',
+        'client_secret': ''
+    }
+    
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+
+    login_response = requests.post(
+        f"{BASE_URL}/login",  # Replace with the actual login endpoint
+        data=login_data,
+        headers=headers
+    )
+    
+    # Extract token
+    print("Login Response:", login_response.text)
+    if login_response.status_code != 200:
+        print("Login failed!")
+        return
+    token = login_response.json()["access_token"]
+    
+    # Step 2: Prepare headers with token
+    headers = {
+        "Authorization": f"Bearer {token}",
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+    }
+
+    # Step 3: Prepare teacher data
+    teacher_data = {
+        "full_name": "Oliver Williams Rey",
+        "teacher_id": '30216',
+        "department": "Science",
+        "email": "oliverrayyyy12@example.com",
+        "password": "Smartassess1"
+    }
+    files = None
+    if Path("teacher_image.jpg").exists():
+        files = {
+            "image": ("teacher_image.jpg", open("teacher_image.jpg", "rb"), "image/png")
+        }
+    
+    # Step 4: Make a POST request to add a teacher
+    response = requests.post(
+        f"{BASE_URL}/universityadmin/teacher",
+        headers=headers,
+        data=teacher_data,  # Send form data
+        files=files  # Send image file if it exists
+    )
+    
+    # Step 5: Print response
+    print("Status Code:", response.status_code)
+    print("Response:", response.text)
+
+if __name__ == "__main__":
+    test_add_teacher()
