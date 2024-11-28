@@ -16,5 +16,7 @@ COPY . .
 # Expose the port that the application runs on
 EXPOSE 8000
 
+ENV CORS_ORIGINS="*"
+
 # Command to run the application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
