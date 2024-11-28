@@ -1,7 +1,7 @@
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from models.models import SuperAdmin
+from models.models import *
 from utils.dependencies import get_db
 from utils.security import create_access_token, verify_password, SECRET_KEY, ALGORITHM
 from datetime import timedelta, datetime
@@ -28,6 +28,17 @@ async def login_for_access_token(
             "created_at": user.created_at,
             "role": role,
         }
+    # Authenticate university admin
+    if not user:
+        user = authenticate_university_admin(db, form_data.username, form_data.password)
+        if user:
+            role = "universityadmin"
+            user_data = {
+                "id": user.id,
+                "email": user.email,
+                "created_at": user.created_at,
+                "role": role,
+            }
 
     if not user:
         raise HTTPException(
@@ -58,6 +69,22 @@ def authenticate_super_admin(db: Session, email: str, password: str):
         return admin
     return None
 
+def authenticate_university_admin(db: Session, email: str, password: str):
+    admin = db.query(UniversityAdmin).filter(
+        UniversityAdmin.email == email.strip()).first()
+
+    if admin and verify_password(password, admin.password):
+        return admin
+    return None
+
+def authenticate_teacher(db: Session, email: str, password: str):
+    admin = db.query(Teacher).filter(
+        Teacher.email == email.strip()).first()
+
+    if admin and verify_password(password, admin.password):
+        return admin
+    return None
+
 async def get_current_admin(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
@@ -69,17 +96,32 @@ async def get_current_admin(
     )
 
     try:
+        # Decode the JWT token to get the payload
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         admin_id: str = payload.get("sub")
         role: str = payload.get("role")
 
-        if admin_id is None or role != "superadmin":
+        if admin_id is None:
+            raise credentials_exception
+
+        # Check if the role is either superadmin or universityadmin
+        if role == "superadmin":
+            admin = db.query(SuperAdmin).filter(SuperAdmin.id == admin_id).first()
+            if admin is None:
+                raise credentials_exception
+            return admin  # Return SuperAdmin if found
+        elif role == "universityadmin":
+            admin = db.query(UniversityAdmin).filter(UniversityAdmin.id == admin_id).first()
+            if admin is None:
+                raise credentials_exception
+            return admin  # Return UniversityAdmin if found
+        elif role == "teacher":
+            admin = db.query(Teacher).filter(Teacher.id == admin_id).first()
+            if admin is None:
+                raise credentials_exception
+            return admin  # Return UniversityAdmin if found
+        else:
             raise credentials_exception
 
     except JWTError:
         raise credentials_exception
-
-    admin = db.query(SuperAdmin).filter(SuperAdmin.id == admin_id).first()
-    if admin is None:
-        raise credentials_exception
-    return admin

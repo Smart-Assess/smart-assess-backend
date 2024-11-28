@@ -56,7 +56,51 @@ class University(Base):
     super_admin_id = Column(Integer, ForeignKey('super_admins.id'))
     super_admin = relationship("SuperAdmin", back_populates="universities")
     admins = relationship("UniversityAdmin", back_populates="university")
-
+    students = relationship("Student", back_populates="university")
+    teachers = relationship("Teacher", back_populates="university")  # Add this line
+    
+class Student(Base):
+    __tablename__ = "students"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String, nullable=False)
+    student_id = Column(String, unique=True, index=True, nullable=False)
+    department = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    batch = Column(String, nullable=False)
+    section = Column(String, nullable=False)
+    password = Column(String, nullable=False)
+    image_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    university_id = Column(Integer, ForeignKey('universities.id'))
+    university = relationship("University", back_populates="students")
+class Teacher(Base):
+    __tablename__ = "teachers"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String, nullable=False)
+    teacher_id = Column(String, unique=True, index=True, nullable=True)
+    department = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password = Column(String, nullable=False)
+    image_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    university_id = Column(Integer, ForeignKey('universities.id'))
+    university = relationship("University", back_populates="teachers")
+    courses = relationship("Course", back_populates="teacher")  # Add this line
+class Course(Base):
+    __tablename__ = "courses"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    batch = Column(String, nullable=False)
+    group = Column(String, nullable=True)
+    image_url = Column(String, nullable=True)
+    section = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="Active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    teacher_id = Column(Integer, ForeignKey('teachers.id'))
+    teacher = relationship("Teacher", back_populates="courses")
 
 # Create tables in the database
 Base.metadata.create_all(bind=engine)
