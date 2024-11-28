@@ -12,8 +12,15 @@ urllib3
 passlib
 uvicorn
 alembic
+langchain==0.2.14
 psycopg2-binary
 sqlalchemy==2.0.36
 python-jose==3.3.0
 python-multipart
 boto3
+langchain-groq==0.1.5
+numpy
+scipy
+sentencepiece
+bestrag
+spacy
