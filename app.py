@@ -1,5 +1,7 @@
 # >> Import necessary modules and packages from FastAPI and other libraries
 from apis.superadmin import router as superadmin
+from apis.universityadmin import router as universityadmin
+from apis.teacher import router as teacher
 from apis.auth import router as token
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +21,8 @@ app.add_middleware(
 
 app.include_router(token)
 app.include_router(superadmin)
+app.include_router(universityadmin)
+app.include_router(teacher)
 
 if __name__ == "__main__":
     import uvicorn
