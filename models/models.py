@@ -1,3 +1,5 @@
+import random
+import string
 from sqlalchemy import (
     Column,
     Float,
@@ -10,6 +12,8 @@ from sqlalchemy import (
     create_engine,
     UniqueConstraint,
     Enum,
+    event,
+    select,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
@@ -24,6 +28,7 @@ Base = declarative_base()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
 class SuperAdmin(Base):
     __tablename__ = "super_admins"
     id = Column(Integer, primary_key=True, index=True)
@@ -31,6 +36,7 @@ class SuperAdmin(Base):
     password = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
     universities = relationship("University", back_populates="super_admin")
+
 
 class UniversityAdmin(Base):
     __tablename__ = "university_admins"
@@ -41,6 +47,7 @@ class UniversityAdmin(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     university_id = Column(Integer, ForeignKey('universities.id'))
     university = relationship("University", back_populates="admins")
+
 
 class University(Base):
     __tablename__ = "universities"
@@ -57,11 +64,13 @@ class University(Base):
     super_admin = relationship("SuperAdmin", back_populates="universities")
     admins = relationship("UniversityAdmin", back_populates="university")
     students = relationship("Student", back_populates="university")
-    teachers = relationship("Teacher", back_populates="university")  # Add this line
-    
+    teachers = relationship(
+        "Teacher", back_populates="university")  # Add this line
+
+
 class Student(Base):
     __tablename__ = "students"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String, nullable=False)
     student_id = Column(String, unique=True, index=True, nullable=False)
@@ -74,9 +83,12 @@ class Student(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     university_id = Column(Integer, ForeignKey('universities.id'))
     university = relationship("University", back_populates="students")
+    courses = relationship("StudentCourse", back_populates="student")
+
+
 class Teacher(Base):
     __tablename__ = "teachers"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String, nullable=False)
     teacher_id = Column(String, unique=True, index=True, nullable=True)
@@ -88,19 +100,72 @@ class Teacher(Base):
     university_id = Column(Integer, ForeignKey('universities.id'))
     university = relationship("University", back_populates="teachers")
     courses = relationship("Course", back_populates="teacher")  # Add this line
+
+
+def generate_course_code():
+    letters = ''.join(random.choices(string.ascii_uppercase, k=4))
+    numbers = ''.join(random.choices(string.digits, k=2))
+    return f"{letters}{numbers}"
+
+
 class Course(Base):
     __tablename__ = "courses"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     batch = Column(String, nullable=False)
     group = Column(String, nullable=True)
-    image_url = Column(String, nullable=True)
+    pdf_urls = Column(String, default='[]')
     section = Column(String, nullable=False)
     status = Column(String, nullable=False, default="Active")
+    course_code = Column(String(6), nullable=False, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    collection_name = Column(String, unique=True, nullable=False)
     teacher_id = Column(Integer, ForeignKey('teachers.id'))
     teacher = relationship("Teacher", back_populates="courses")
+    assignments = relationship(
+        "Assignment", back_populates="course", cascade="all, delete-orphan")
+    students = relationship("StudentCourse", back_populates="course")
 
-# Create tables in the database
+
+@event.listens_for(Course, 'before_insert')
+def set_course_code(mapper, connection, target):
+    if not target.course_code:
+        while True:
+            code = generate_course_code()
+            exists = connection.execute(
+                select(Course.id).where(Course.course_code == code)
+            ).first()
+            if not exists:
+                target.course_code = code
+                break
+
+
+class Assignment(Base):
+    __tablename__ = "assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    deadline = Column(DateTime, nullable=False)
+    grade = Column(Integer, nullable=False)
+    question_pdf_url = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    course_id = Column(Integer, ForeignKey('courses.id'))
+    course = relationship("Course", back_populates="assignments")
+
+
 Base.metadata.create_all(bind=engine)
+
+
+class StudentCourse(Base):
+    __tablename__ = "student_courses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey('students.id'))
+    course_id = Column(Integer, ForeignKey('courses.id'))
+    status = Column(String, default="pending")  # pending, accepted, rejected
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    student = relationship("Student", back_populates="courses")
+    course = relationship("Course", back_populates="students")

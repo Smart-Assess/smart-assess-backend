@@ -19,7 +19,7 @@ import os
 import numpy as np
 import time as tf
 import logging
-from utils.bleurt.bleurt.lightweight_scorer import evaluate_alignment
+from utils.bleurt.bleurt.resource_tracker import evaluate_alignment
 
 DEFAULT_BLEURT_BATCH_SIZE = 16
 
