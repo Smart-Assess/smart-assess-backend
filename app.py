@@ -1,4 +1,5 @@
 # >> Import necessary modules and packages from FastAPI and other libraries
+from apis.student import router as student
 from apis.superadmin import router as superadmin
 from apis.universityadmin import router as universityadmin
 from apis.teacher import router as teacher
@@ -21,6 +22,7 @@ app.include_router(token)
 app.include_router(superadmin)
 app.include_router(universityadmin)
 app.include_router(teacher)
+app.include_router(student)
 
 if __name__ == "__main__":
     import uvicorn
