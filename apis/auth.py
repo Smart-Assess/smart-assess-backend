@@ -3,12 +3,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from models.models import *
 from utils.dependencies import get_db
-from utils.security import create_access_token, verify_password, SECRET_KEY, ALGORITHM
+from utils.security import (create_access_token, verify_password,
+                            SECRET_KEY, ALGORITHM)
 from datetime import timedelta, datetime
 from jose import jwt, JWTError
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 router = APIRouter()
+
 
 @router.post("/login", response_model=dict)
 async def login_for_access_token(
@@ -22,7 +24,8 @@ async def login_for_access_token(
     auth_functions = [
         (authenticate_super_admin, "superadmin"),
         (authenticate_university_admin, "universityadmin"),
-        (authenticate_teacher, "teacher")
+        (authenticate_teacher, "teacher"),
+        (authenticate_student, "student"),
     ]
 
     for auth_function, user_role in auth_functions:
@@ -57,12 +60,14 @@ async def login_for_access_token(
         "user": user_data,
     }
 
+
 def authenticate_super_admin(db: Session, email: str, password: str):
     admin = db.query(SuperAdmin).filter(
         SuperAdmin.email == email.strip()).first()
     if admin and verify_password(password, admin.password):
         return admin
     return None
+
 
 def authenticate_university_admin(db: Session, email: str, password: str):
     admin = db.query(UniversityAdmin).filter(
@@ -72,6 +77,7 @@ def authenticate_university_admin(db: Session, email: str, password: str):
         return admin
     return None
 
+
 def authenticate_teacher(db: Session, email: str, password: str):
     admin = db.query(Teacher).filter(
         Teacher.email == email.strip()).first()
@@ -79,6 +85,15 @@ def authenticate_teacher(db: Session, email: str, password: str):
     if admin and verify_password(password, admin.password):
         return admin
     return None
+
+
+def authenticate_student(db: Session, email: str, password: str):
+    student = db.query(Student).filter(
+        Student.email == email.strip()).first()
+    if student and verify_password(password, student.password):
+        return student
+    return None
+
 
 async def get_current_admin(
     token: str = Depends(oauth2_scheme),
@@ -91,32 +106,31 @@ async def get_current_admin(
     )
 
     try:
-        # Decode the JWT token to get the payload
+        # Decode the JWT token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        admin_id: str = payload.get("sub")
+        user_id: str = payload.get("sub")
         role: str = payload.get("role")
 
-        if admin_id is None:
+        if user_id is None:
             raise credentials_exception
 
-        # Check if the role is either superadmin or universityadmin
         if role == "superadmin":
-            admin = db.query(SuperAdmin).filter(SuperAdmin.id == admin_id).first()
-            if admin is None:
-                raise credentials_exception
-            return admin  # Return SuperAdmin if found
+            user = db.query(SuperAdmin).filter(
+                SuperAdmin.id == user_id).first()
         elif role == "universityadmin":
-            admin = db.query(UniversityAdmin).filter(UniversityAdmin.id == admin_id).first()
-            if admin is None:
-                raise credentials_exception
-            return admin  # Return UniversityAdmin if found
+            user = db.query(UniversityAdmin).filter(
+                UniversityAdmin.id == user_id).first()
         elif role == "teacher":
-            admin = db.query(Teacher).filter(Teacher.id == admin_id).first()
-            if admin is None:
-                raise credentials_exception
-            return admin  # Return UniversityAdmin if found
+            user = db.query(Teacher).filter(Teacher.id == user_id).first()
+        elif role == "student":
+            user = db.query(Student).filter(Student.id == user_id).first()
         else:
             raise credentials_exception
+
+        if user is None:
+            raise credentials_exception
+
+        return user
 
     except JWTError:
         raise credentials_exception
