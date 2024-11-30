@@ -83,7 +83,33 @@ async def get_student(
     db: Session = Depends(get_db),
     current_admin: UniversityAdmin = Depends(get_current_admin),
 ):
-    student = db.query(Student).filter(Student.id == student_id).first()
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    return {
+        "success": True,
+        "status": 200,
+        "student": {
+            "student_id": student.student_id,
+            "full_name": student.full_name,
+            "student_id": student.student_id,
+            "department": student.department,
+            "email": student.email,
+            "batch": student.batch,
+            "section": student.section,
+            "created_at": student.created_at,
+            "university_id": student.university_id,
+        }
+    }
+
+@router.get("/universityadmin/student/{student_id}", response_model=dict)
+async def get_student(
+    student_id: str,  # Change to str
+    db: Session = Depends(get_db),
+    current_admin: UniversityAdmin = Depends(get_current_admin),
+):
+    student = db.query(Student).filter(Student.student_id == student_id).first()  # Change to student_id
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
@@ -103,49 +129,13 @@ async def get_student(
         }
     }
 
-@router.get("/universityadmin/students", response_model=dict)
-async def get_students(
-    page: int = 1,
-    limit: int = 10,
-    db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin),
-):
-    offset = (page - 1) * limit
-    
-    total = db.query(Student).filter(Student.university_id == current_admin.university_id).count()
-    
-    students = db.query(Student).filter(Student.university_id == current_admin.university_id).offset(offset).limit(limit).all()
-    
-    students_data = []
-    for student in students:
-        students_data.append({
-            "id": student.id,
-            "full_name": student.full_name,
-            "student_id": student.student_id,
-            "department": student.department,
-            "email": student.email,
-            "batch": student.batch,
-            "section": student.section,
-        })
-
-    return {
-        "success": True,
-        "status": 200,
-        "total": total,
-        "page": page,
-        "total_pages": (total + limit - 1) // limit,
-        "students": students_data,
-        "has_previous": page > 1,
-        "has_next": (offset + limit) < total,
-    }
-
 @router.delete("/universityadmin/student/{student_id}", response_model=dict)
 async def delete_student(
-    student_id: str,
+    student_id: str,  # Change to str
     db: Session = Depends(get_db),
     current_admin: UniversityAdmin = Depends(get_current_admin)
 ):
-    student = db.query(Student).filter(Student.id == student_id).first()
+    student = db.query(Student).filter(Student.student_id == student_id).first()  # Change to student_id
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
@@ -160,7 +150,7 @@ async def delete_student(
 
 @router.put("/universityadmin/student/{student_id}", response_model=dict)
 async def update_student(
-    student_id: str,
+    student_id: str,  # Change to str
     full_name: str = Form(...),
     department: str = Form(...),
     email: str = Form(...),
@@ -170,11 +160,11 @@ async def update_student(
     db: Session = Depends(get_db),
     current_admin: UniversityAdmin = Depends(get_current_admin)
 ):
-    student = db.query(Student).filter(Student.id == student_id).first()
+    student = db.query(Student).filter(Student.student_id == student_id).first()  # Change to student_id
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    existing_student = db.query(Student).filter(Student.email == email, Student.id != student_id).first()
+    existing_student = db.query(Student).filter(Student.email == email, Student.student_id != student_id).first()
     if existing_student:
         raise HTTPException(status_code=400, detail="Email already taken by another student")
 
@@ -254,10 +244,53 @@ async def add_teacher(
         "status": 201,
         "teacher_id": new_teacher.id,
     }
+@router.get("/universityadmin/teacher/{teacher_id}", response_model=dict)
+async def get_teacher(
+    teacher_id: str,  # Change to str
+    db: Session = Depends(get_db),
+    current_admin: UniversityAdmin = Depends(get_current_admin),
+):
+    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()  # Change to teacher_id
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    return {
+        "success": True,
+        "status": 200,
+        "teacher": {
+            "id": teacher.id,
+            "full_name": teacher.full_name,
+            "teacher_id": teacher.teacher_id,
+            "department": teacher.department,
+            "email": teacher.email,
+            "image_url": teacher.image_url,
+            "created_at": teacher.created_at,
+            "university_id": teacher.university_id,
+        }
+    }
+
+@router.delete("/universityadmin/teacher/{teacher_id}", response_model=dict)
+async def delete_teacher(
+    teacher_id: str,  # Change to str
+    db: Session = Depends(get_db),
+    current_admin: UniversityAdmin = Depends(get_current_admin)
+):
+    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()  # Change to teacher_id
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    db.delete(teacher)
+    db.commit()
+
+    return {
+        "success": True,
+        "status": 200,
+        "message": "Teacher deleted successfully"
+    }
 
 @router.put("/universityadmin/teacher/{teacher_id}", response_model=dict)
 async def update_teacher(
-    teacher_id: int,
+    teacher_id: str,  # Change to str
     full_name: str = Form(...),
     department: str = Form(...),
     email: str = Form(...),
@@ -266,11 +299,11 @@ async def update_teacher(
     db: Session = Depends(get_db),
     current_admin: UniversityAdmin = Depends(get_current_admin)
 ):
-    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()  # Change to teacher_id
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
-    existing_teacher = db.query(Teacher).filter(Teacher.email == email, Teacher.id != teacher_id).first()
+    existing_teacher = db.query(Teacher).filter(Teacher.email == email, Teacher.teacher_id != teacher_id).first()
     if existing_teacher:
         raise HTTPException(status_code=400, detail="Email already taken by another teacher")
 
@@ -298,50 +331,6 @@ async def update_teacher(
 
     db.commit()
     db.refresh(teacher)
-
-    return {
-        "success": True,
-        "status": 200,
-        "teacher": {
-            "id": teacher.id,
-            "full_name": teacher.full_name,
-            "teacher_id": teacher.teacher_id,
-            "department": teacher.department,
-            "email": teacher.email,
-            "image_url": teacher.image_url,
-            "created_at": teacher.created_at,
-            "university_id": teacher.university_id,
-        }
-    }
-
-@router.delete("/universityadmin/teacher/{teacher_id}", response_model=dict)
-async def delete_teacher(
-    teacher_id: int,
-    db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin)
-):
-    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Teacher not found")
-
-    db.delete(teacher)
-    db.commit()
-
-    return {
-        "success": True,
-        "status": 200,
-        "message": "Teacher deleted successfully"
-    }
-
-@router.get("/universityadmin/teacher/{teacher_id}", response_model=dict)
-async def get_teacher(
-    teacher_id: int,
-    db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin),
-):
-    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Teacher not found")
 
     return {
         "success": True,

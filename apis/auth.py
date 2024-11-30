@@ -19,26 +19,23 @@ async def login_for_access_token(
     role = None
     user_data = {}
 
-    user = authenticate_super_admin(db, form_data.username, form_data.password)
-    if user:
-        role = "superadmin"
-        user_data = {
-            "id": user.id,
-            "email": user.email,
-            "created_at": user.created_at,
-            "role": role,
-        }
-    # Authenticate university admin
-    if not user:
-        user = authenticate_university_admin(db, form_data.username, form_data.password)
+    auth_functions = [
+        (authenticate_super_admin, "superadmin"),
+        (authenticate_university_admin, "universityadmin"),
+        (authenticate_teacher, "teacher")
+    ]
+
+    for auth_function, user_role in auth_functions:
+        user = auth_function(db, form_data.username, form_data.password)
         if user:
-            role = "universityadmin"
+            role = user_role
             user_data = {
                 "id": user.id,
                 "email": user.email,
                 "created_at": user.created_at,
                 "role": role,
             }
+            break
 
     if not user:
         raise HTTPException(
@@ -48,9 +45,7 @@ async def login_for_access_token(
         )
 
     access_token = create_access_token(
-        data={
-            "sub": str(user.id)
-            },
+        data={"sub": str(user.id)},
         role=role,
     )
 
