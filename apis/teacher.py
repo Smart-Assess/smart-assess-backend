@@ -17,6 +17,7 @@ from typing import Optional
 
 from utils.s3 import upload_to_s3
 from utils.security import get_password_hash
+import os
 router = APIRouter()
 
 @router.post("/teacher/course", response_model=dict)
