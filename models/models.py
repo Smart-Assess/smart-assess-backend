@@ -13,6 +13,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Enum,
     event,
+    func,
     select,
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -84,6 +85,7 @@ class Student(Base):
     university_id = Column(Integer, ForeignKey('universities.id'))
     university = relationship("University", back_populates="students")
     courses = relationship("StudentCourse", back_populates="student")
+    submissions = relationship("AssignmentSubmission", back_populates="student")
 
 
 class Teacher(Base):
@@ -153,6 +155,7 @@ class Assignment(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     course_id = Column(Integer, ForeignKey('courses.id'))
     course = relationship("Course", back_populates="assignments")
+    submissions = relationship("AssignmentSubmission", back_populates="assignment")
 
 
 Base.metadata.create_all(bind=engine)
@@ -169,3 +172,36 @@ class StudentCourse(Base):
 
     student = relationship("Student", back_populates="courses")
     course = relationship("Course", back_populates="students")
+
+class AssignmentSubmission(Base):
+    __tablename__ = "assignment_submissions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    assignment_id = Column(Integer, ForeignKey('assignments.id'))
+    student_id = Column(Integer, ForeignKey('students.id'))
+    submission_pdf_url = Column(String, nullable=False)
+    submitted_at = Column(DateTime, default=datetime.utcnow)
+    
+    assignment = relationship("Assignment", back_populates="submissions")
+    student = relationship("Student", back_populates="submissions")
+    evaluations = relationship("AssignmentEvaluation", back_populates="submission")
+
+
+class AssignmentEvaluation(Base):
+    __tablename__ = "assignment_evaluations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    submission_id = Column(Integer, ForeignKey("assignment_submissions.id"), nullable=False)
+    total_score = Column(Float, nullable=False)
+    plagiarism_score = Column(Float, nullable=True)
+    ai_detection_score = Column(Float, nullable=True) 
+    grammar_score = Column(Float, nullable=True)
+    feedback = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    submission = relationship("AssignmentSubmission", back_populates="evaluations")
+        
+@event.listens_for(AssignmentEvaluation, 'before_update')
+def set_updated_at(mapper, connection, target):
+    target.updated_at = func.now()
