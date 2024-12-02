@@ -27,8 +27,7 @@ def upload_to_s3(folder_name, file_name, file_path):
     try:
         s3_client.upload_file(file_path, bucket_name, s3_key)
 
-        url = f"https://{bucket_name}.s3.{
-            os.getenv('AWS_DEFAULT_REGION')}.amazonaws.com/{s3_key}"
+        url = f"https://{bucket_name}.s3.{os.getenv('AWS_DEFAULT_REGION')}.amazonaws.com/{s3_key}"
 
         return url
     except FileNotFoundError:
