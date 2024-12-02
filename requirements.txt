@@ -24,3 +24,6 @@ scipy
 sentencepiece
 bestrag
 spacy
+PyPDF2
+pymongo
+scikit-learn
