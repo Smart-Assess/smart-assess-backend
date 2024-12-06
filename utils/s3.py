@@ -7,12 +7,15 @@ load_dotenv()
 
 
 def get_s3_client():
-    return boto3.client(
-        's3',
-        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-        region_name=os.getenv('AWS_DEFAULT_REGION')
-    )
+    try:
+        return boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.getenv('AWS_DEFAULT_REGION')
+        )
+    except Exception as e:
+        print("AWS credentials not available")
 
 
 def upload_to_s3(folder_name, file_name, file_path):
@@ -108,9 +111,10 @@ if __name__ == "__main__":
     # if not bucket_name:
     #     raise ValueError("S3_BUCKET_NAME environment variable is not set")
     # main()
+    upload_to_s3("testing","test.pdf","/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf")
 
-    delete_from_s3(
-        "https://smartassess-bucket.s3.eu-north-1.amazonaws.com/university_images/WhatsApp Image 2023-08-24 at 8.20.26 PM.jpeg")
+    # delete_from_s3(
+    #     "https://smartassess-bucket.s3.eu-north-1.amazonaws.com/university_images/WhatsApp Image 2023-08-24 at 8.20.26 PM.jpeg")
     # Delete all contents in the folders
     # __delete_folder_contents(bucket_name, 'book_images/')
     # __delete_folder_contents(bucket_name, 'maths/')
