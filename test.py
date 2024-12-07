@@ -44,39 +44,38 @@
 #         connection.close()
 
 
-# import re
-# import re
+import re
 
-# # Load the English NLP model from spaCy
-# def clean_and_tokenize_text(data):
-#     cleaned_texts = ""
+# Load the English NLP model from spaCy
+def clean_and_tokenize_text(data):
+    cleaned_texts = ""
 
-#     for point in data.points:
-#         if 'text' in point.payload:
-#             # Extract raw text
-#             raw_text = point.payload['text']
+    for point in data.points:
+        if 'text' in point.payload:
+            # Extract raw text
+            raw_text = point.payload['text']
 
-#             # Step 1: Remove unwanted characters (like bullet points)
-#             cleaned_text = re.sub(r'[●■○]', '', raw_text)  # Remove specific bullets
-#             cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()  # Normalize spaces
+            # Step 1: Remove unwanted characters (like bullet points)
+            cleaned_text = re.sub(r'[●■○]', '', raw_text)  # Remove specific bullets
+            cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()  # Normalize spaces
 
-#             # Step 2: Tokenize the text
-#             tokens = cleaned_text.split()
+            # Step 2: Tokenize the text
+            tokens = cleaned_text.split()
 
-#             # Step 3: Filter tokens (remove non-alphanumeric tokens)
-#             filtered_tokens = [
-#                 token.lower()  # Lowercase
-#                 for token in tokens
-#                 if token.isalnum()  # Remove non-alphanumeric tokens
-#             ]
+            # Step 3: Filter tokens (remove non-alphanumeric tokens)
+            filtered_tokens = [
+                token.lower()  # Lowercase
+                for token in tokens
+                if token.isalnum()  # Remove non-alphanumeric tokens
+            ]
 
-#             # Step 4: Join filtered tokens back into a string
-#             cleaned_text = ' '.join(filtered_tokens)
+            # Step 4: Join filtered tokens back into a string
+            cleaned_text = ' '.join(filtered_tokens)
 
-#             # Append cleaned text to the list
-#             cleaned_texts += cleaned_text
+            # Append cleaned text to the list
+            cleaned_texts += cleaned_text
 
-#     return cleaned_texts
+    return cleaned_texts
 
 
 
@@ -528,12 +527,12 @@ def test_student_assignment_workflow():
     # print("Delete Submission Status:", response.status_code)
     # print("Delete Response:", response.text)
 
-if __name__ == "__main__":
-    # test_add_university()
-    # test_add_student()
-    # test_create_course()
-    # test_student_login_and_join_course()
-    test_student_assignment_workflow()
+# if __name__ == "__main__":
+#     # test_add_university()
+#     # test_add_student()
+#     # test_create_course()
+#     # test_student_login_and_join_course()
+#     test_student_assignment_workflow()
     # test_create_assignment()
     # test_create_course()
     # test_add_university()
