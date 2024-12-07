@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from models.models import SuperAdmin
 from passlib.context import CryptContext
 
-DATABASE_URL = "postgresql://postgres:samadpls123@smartassessdb.cn0824m6mgt7.us-east-1.rds.amazonaws.com:5432/fypdb"
+DATABASE_URL = "postgresql://avnadmin:AVNS_mCX_DjHMFQgYit8p4lL@fypdb-fypdb.i.aivencloud.com:27272/defaultdb?sslmode=require"
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -30,7 +30,7 @@ def create_superadmin(email: str, password: str):
         session.close()
 
 if __name__ == "__main__":
-    create_superadmin(email="abdulsamadsid1@gmail.com", password="12345")
+    create_superadmin(email="sa@gmail.com", password="12345")
 
 
 

@@ -21,8 +21,7 @@ from sqlalchemy.orm import relationship, sessionmaker
 from datetime import datetime
 from passlib.context import CryptContext
 
-
-DATABASE_URL = "postgresql://postgres:samadpls123@smartassessdb.cn0824m6mgt7.us-east-1.rds.amazonaws.com:5432/fypdb"
+DATABASE_URL = "postgresql://avnadmin:AVNS_mCX_DjHMFQgYit8p4lL@fypdb-fypdb.i.aivencloud.com:27272/defaultdb?sslmode=require"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -158,9 +157,6 @@ class Assignment(Base):
     submissions = relationship("AssignmentSubmission", back_populates="assignment")
 
 
-Base.metadata.create_all(bind=engine)
-
-
 class StudentCourse(Base):
     __tablename__ = "student_courses"
 
@@ -205,3 +201,5 @@ class AssignmentEvaluation(Base):
 @event.listens_for(AssignmentEvaluation, 'before_update')
 def set_updated_at(mapper, connection, target):
     target.updated_at = func.now()
+    
+Base.metadata.create_all(bind=engine)
