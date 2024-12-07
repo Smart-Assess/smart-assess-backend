@@ -20,6 +20,8 @@ def get_s3_client():
 
 def upload_to_s3(folder_name, file_name, file_path):
     s3_client = get_s3_client()
+    print(s3_client)
+    print("S3 client created successfully")
 
     bucket_name = os.getenv('S3_BUCKET_NAME')
     if not bucket_name:
@@ -111,7 +113,7 @@ if __name__ == "__main__":
     # if not bucket_name:
     #     raise ValueError("S3_BUCKET_NAME environment variable is not set")
     # main()
-    upload_to_s3("testing","test.pdf","/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf")
+    print(upload_to_s3("testing","test1.pdf","/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf"))
 
     # delete_from_s3(
     #     "https://smartassess-bucket.s3.eu-north-1.amazonaws.com/university_images/WhatsApp Image 2023-08-24 at 8.20.26 PM.jpeg")
