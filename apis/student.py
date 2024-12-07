@@ -5,7 +5,7 @@ from models.models import *
 from utils.dependencies import get_db
 from apis.auth import get_current_admin
 from utils.s3 import delete_from_s3, upload_to_s3
-from utils.plagrism import PDFQuestionAnswerExtractor
+from utils.plagiarism import PDFQuestionAnswerExtractor
 
 router = APIRouter()
 

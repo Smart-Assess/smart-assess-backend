@@ -2,6 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from models.models import SuperAdmin
 from passlib.context import CryptContext
+import requests
+from pathlib import Path
 
 DATABASE_URL = "postgresql://avnadmin:AVNS_mCX_DjHMFQgYit8p4lL@fypdb-fypdb.i.aivencloud.com:27272/defaultdb?sslmode=require"
 
@@ -28,9 +30,98 @@ def create_superadmin(email: str, password: str):
         print(f"Error creating SuperAdmin: {e}")
     finally:
         session.close()
+        
+
+# Config
+BASE_URL = "http://127.0.0.1:8000"
+
+def get_auth_token():
+    login_data = {
+        'grant_type': 'password',
+        'username': 'sa@gmail.com',
+        'password': '12345',
+        'scope': '',
+        'client_id': '',
+        'client_secret': ''
+    }
+    
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+
+    try:
+        login_response = requests.post(
+            f"{BASE_URL}/login",
+            data=login_data,
+            headers=headers
+        )
+        
+        if login_response.status_code != 200:
+            print(f"Login failed: {login_response.text}")
+            return None
+            
+        return login_response.json()["access_token"]
+    except Exception as e:
+        print(f"Login error: {str(e)}")
+        return None
+
+def test_add_university():
+    # Get token
+    token = get_auth_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+    
+    # Test data
+    data = {
+        "university_name": "Test University",
+        "university_email": "u@gmail.com",
+        "phone_number": "1234567890",
+        "street_address": "123 Test St",
+        "city": "Test City",
+        "state": "Test State",
+        "zipcode": "12345",
+        "admin_name": "Admin Test",
+        "admin_email": "ua@gmail.com",  # Updated admin email
+        "admin_password": "12345"
+    }
+
+    # Handle image
+    files = None
+    image_path = Path("pfp.jpg")
+    if image_path.exists():
+        files = {
+            'image': ('test_image.jpg', open(image_path, 'rb'), 'image/jpeg')
+        }
+
+    # Prepare form data
+    form_data = {k: (None, v) for k, v in data.items()}
+    if files:
+        form_data.update(files)
+
+    try:
+        response = requests.post(
+            f"{BASE_URL}/superadmin/university",
+            files=form_data,
+            headers={
+                'Authorization': f'Bearer {token}'
+            }
+        )
+        
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+    except Exception as e:
+        print(f"Error: {str(e)}")
+
+
 
 if __name__ == "__main__":
-    create_superadmin(email="sa@gmail.com", password="12345")
+    test_add_university()
+    # create_superadmin(email="sa@gmail.com", password="12345")
+    
+
 
 
 

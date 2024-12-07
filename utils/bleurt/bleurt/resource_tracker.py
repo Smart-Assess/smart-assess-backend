@@ -199,7 +199,7 @@ class WeightFitter(ABC):
             result = json.loads(result.strip())
             return result["score"]
         except (json.JSONDecodeError, KeyError):
-            print("Error parsing response:", response.choices[0].message.content)
+            # print("Error parsing response:", response.choices[0].message.content)
             return 0.0
 
 

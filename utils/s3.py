@@ -72,6 +72,39 @@ def delete_from_s3(file_url: str) -> bool:
         print(f"An error occurred: {e}")
         return False
 
+def download_from_s3(s3_url: str, local_path: str) -> bool:
+    """
+    Download a file from S3 to a local path
+    
+    Args:
+        s3_url: Full S3 URL of the file
+        local_path: Local path to save the file
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    s3_client = get_s3_client()
+    bucket_name = os.getenv('S3_BUCKET_NAME')
+    
+    if not bucket_name:
+        raise ValueError("S3_BUCKET_NAME environment variable is not set")
+
+    try:
+        # Extract key from S3 URL
+        s3_key = s3_url.split(f"{bucket_name}.s3.{os.getenv('AWS_DEFAULT_REGION')}.amazonaws.com/")[1]
+        
+        # Download file
+        s3_client.download_file(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Filename=local_path
+        )
+        return True
+        
+    except Exception as e:
+        print(f"Error downloading from S3: {str(e)}")
+        return False
+
 # def __delete_folder_contents(bucket_name, folder_name):
 #     s3_client = get_s3_client()
 
