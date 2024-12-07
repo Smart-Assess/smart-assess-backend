@@ -1,28 +1,116 @@
 
-Code	Details
-422	
-Error: Unprocessable Entity
+# test_university_admin.py
+import requests
+from pathlib import Path
 
-Response body
-Download
-{
-  "detail": [
-    {
-      "type": "int_parsing",
-      "loc": [
-        "body",
-        "student_id"
-      ],
-      "msg": "Input should be a valid integer, unable to parse string as an integer",
-      "input": "21B-011-SE"
+BASE_URL = "http://127.0.0.1:8000"
+
+def get_auth_token():
+    login_data = {
+        'grant_type': 'password',
+        'username': 'ua@gmail.com',  # University admin email
+        'password': '12345',
+        'scope': '',
+        'client_id': '',
+        'client_secret': ''
     }
-  ]
-}
-Response headers
- access-control-allow-credentials: true 
- access-control-allow-origin: http://127.0.0.1:8000 
- content-length: 162 
- content-type: application/json 
- date: Thu,28 Nov 2024 15:03:44 GMT 
- server: uvicorn 
- vary: Origin 
+    
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+
+    try:
+        response = requests.post(
+            f"{BASE_URL}/login",
+            data=login_data,
+            headers=headers
+        )
+        if response.status_code != 200:
+            print(f"Login failed: {response.text}")
+            return None
+        return response.json()["access_token"]
+    except Exception as e:
+        print(f"Login error: {str(e)}")
+        return None
+
+def test_add_teacher():
+    token = get_auth_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+    
+    data = {
+        "full_name": "Test Teacher",
+        "teacher_id": "T123",
+        "department": "Computer Science",
+        "email": "t@gmail.com",
+        "password": "12345"
+    }
+
+    # Optional image
+    files = None
+    image_path = Path("pfp.jpg")
+    if image_path.exists():
+        files = {
+            'image': ('test_image.jpg', open(image_path, 'rb'), 'image/jpeg')
+        }
+
+    form_data = {k: (None, v) for k, v in data.items()}
+    if files:
+        form_data.update(files)
+
+    try:
+        response = requests.post(
+            f"{BASE_URL}/universityadmin/teacher",
+            files=form_data,
+            headers={'Authorization': f'Bearer {token}'}
+        )
+        print(f"Teacher Creation Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+    except Exception as e:
+        print(f"Error adding teacher: {str(e)}")
+
+def test_add_student():
+    token = get_auth_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+    
+    data = {
+        "full_name": "Test Student",
+        "student_id": "S123",
+        "department": "Computer Science",
+        "email": "s@gmail.com",
+        "batch": "2024",
+        "section": "A",
+        "password": "12345"
+    }
+
+    files = None
+    image_path = Path("pfp.jpg")
+    if image_path.exists():
+        files = {
+            'image': ('test_image.jpg', open(image_path, 'rb'), 'image/jpeg')
+        }
+
+    form_data = {k: (None, v) for k, v in data.items()}
+    if files:
+        form_data.update(files)
+
+    try:
+        response = requests.post(
+            f"{BASE_URL}/universityadmin/student",
+            files=form_data,
+            headers={'Authorization': f'Bearer {token}'}
+        )
+        print(f"Student Creation Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+    except Exception as e:
+        print(f"Error adding student: {str(e)}")
+
+if __name__ == "__main__":
+    print("Testing Teacher Creation:")
+    test_add_teacher()
+    print("\nTesting Student Creation:")
+    test_add_student()

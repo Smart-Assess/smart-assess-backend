@@ -22,7 +22,7 @@ langchain-groq==0.1.5
 numpy
 scipy
 sentencepiece
-bestrag
+bestrag==0.3.2
 spacy
 PyPDF2
 pymongo
