@@ -67,25 +67,43 @@ async def create_course(
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
 ):
+    # Step 1: Create the course without the PDF URLs
     collection_name = generate_collection_name(current_teacher.id, name)
+    new_course = Course(
+        name=name,
+        batch=batch,
+        group=group,
+        section=section,
+        status=status,
+        pdf_urls=json.dumps([]),  # Temporary empty list
+        teacher_id=current_teacher.id,
+        collection_name=collection_name,
+    )
+    db.add(new_course)
+    db.commit()
+    db.refresh(new_course)  # Get the course ID after saving
+
     rag = get_teacher_rag(collection_name)
     pdf_urls = []
+
+    # Step 2: Process the PDFs and upload them with course ID
     if pdfs:
         for pdf in pdfs:
             if not pdf.content_type == 'application/pdf':
                 raise HTTPException(
-                    status_code=400, 
+                    status_code=400,
                     detail=f"File {pdf.filename} must be a PDF"
                 )
             
-            pdf_path = f"/tmp/{pdf.filename}"
+            pdf_path = os.path.join("temp", pdf.filename)
             try:
                 with open(pdf_path, "wb") as buffer:
                     buffer.write(await pdf.read())
                 
+                # Include course ID in the folder or file name for uniqueness
                 pdf_url = upload_to_s3(
                     folder_name=f"course_pdfs/{current_teacher.id}",
-                    file_name=pdf.filename,
+                    file_name=f"{new_course.id}_{pdf.filename}",  # Add course ID to file name
                     file_path=pdf_path
                 )
 
@@ -104,20 +122,9 @@ async def create_course(
             finally:
                 if os.path.exists(pdf_path):
                     os.remove(pdf_path)
-            pdf_urls.append(pdf_url)
 
-    new_course = Course(
-        name=name,
-        batch=batch,
-        group=group,
-        section=section,
-        status=status,
-        pdf_urls=json.dumps(pdf_urls),
-        teacher_id=current_teacher.id,
-        collection_name=collection_name,
-    )
-
-    db.add(new_course)
+    # Step 3: Update the course record with the PDF URLs
+    new_course.pdf_urls = json.dumps(pdf_urls)
     db.commit()
     db.refresh(new_course)
 
@@ -135,6 +142,7 @@ async def create_course(
             "pdf_urls": json.loads(new_course.pdf_urls)
         }
     }
+
     
 @router.get("/teacher/course/{course_id}", response_model=dict)
 async def get_course(
