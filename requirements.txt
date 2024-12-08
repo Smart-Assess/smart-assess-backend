@@ -23,7 +23,6 @@ numpy
 scipy
 sentencepiece
 bestrag==0.3.2
-spacy
 PyPDF2
 pymongo
 scikit-learn
