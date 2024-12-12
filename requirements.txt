@@ -7,7 +7,6 @@ PyMuPDF
 python-dotenv
 requests
 s3transfer
-SQLAlchemy
 urllib3
 passlib
 uvicorn
@@ -19,10 +18,6 @@ python-jose==3.3.0
 python-multipart
 boto3
 langchain-groq==0.1.5
-numpy
-scipy
-sentencepiece
 bestrag==0.3.2
 PyPDF2
-pymongo
 scikit-learn
