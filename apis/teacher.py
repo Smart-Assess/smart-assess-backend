@@ -210,6 +210,54 @@ async def regenerate_course_code(
         "message": "Course code regenerated successfully",
         "new_code": course.course_code
     }
+@router.get("/teacher/courses", response_model=dict)
+async def get_teacher_courses(
+    page: int = 1,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin)
+):
+    # Calculate offset for pagination
+    offset = (page - 1) * limit
+    
+    # Get total count of courses
+    total = db.query(Course)\
+        .filter(Course.teacher_id == current_teacher.id)\
+        .count()
+
+    # Get paginated courses
+    courses = db.query(Course)\
+        .filter(Course.teacher_id == current_teacher.id)\
+        .order_by(Course.created_at.desc())\
+        .offset(offset)\
+        .limit(limit)\
+        .all()
+    
+    # Format course data
+    courses_data = [
+        {
+            "id": course.id,
+            "name": course.name,
+            "batch": course.batch,
+            "group": course.group,
+            "section": course.section,
+            "course_code": course.course_code,
+            "status": course.status,
+            "created_at": course.created_at.strftime("%Y-%m-%d %H:%M")
+        }
+        for course in courses
+    ]
+
+    return {
+        "success": True,
+        "status": 200,
+        "total": total,
+        "page": page,
+        "total_pages": (total + limit - 1) // limit,
+        "courses": courses_data,
+        "has_previous": page > 1,
+        "has_next": (offset + limit) < total
+    }
 
 @router.put("/teacher/course/{course_id}", response_model=dict)
 async def update_course(
