@@ -98,6 +98,7 @@ async def create_course(
             pdf_path = os.path.join("temp", pdf.filename)
             try:
                 with open(pdf_path, "wb") as buffer:
+                    os.makedirs("temp", exist_ok=True)
                     buffer.write(await pdf.read())
                 
                 # Include course ID in the folder or file name for uniqueness
@@ -303,6 +304,7 @@ async def update_course(
                     raise HTTPException(status_code=400, detail="File must be PDF")
                     
                 with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                    os.makedirs("temp", exist_ok=True)
                     content = await pdf.read()
                     temp_file.write(content)
                     temp_file_path = temp_file.name
