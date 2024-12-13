@@ -60,7 +60,7 @@ router = APIRouter()
 async def create_course(
     name: str = Form(...),
     batch: str = Form(...),
-    group: Optional[str] = Form(None),
+    group: Optional[str] = None,
     section: str = Form(...),
     status: str = Form(...),
     pdfs: List[UploadFile] = File(None),
@@ -259,139 +259,104 @@ async def get_teacher_courses(
         "has_next": (offset + limit) < total
     }
 
+
 @router.put("/teacher/course/{course_id}", response_model=dict)
 async def update_course(
     course_id: int,
-    name: Optional[str] = Form(None),
-    batch: Optional[str] = Form(None),
-    group: Optional[str] = Form(None),
-    section: Optional[str] = Form(None),
-    status: Optional[str] = Form(None),
-    pdfs: Optional[List[UploadFile]] = File(None),
-    removed_pdfs: Optional[str] = Form(None),
+    name: str = None,
+    batch: str = None,
+    group: str = None,
+    section: str = None,
+    status: str = None,
+    pdfs: Optional[List[UploadFile]] = None,
+    removed_pdfs: str = None,
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
-
 ):
     course = db.query(Course).filter(
         Course.id == course_id,
         Course.teacher_id == current_teacher.id
     ).first()
-    rag = get_teacher_rag(course.collection_name)
+    
     if not course:
-        raise HTTPException(
-            status_code=404,
-            detail="Course not found or you don't have access"
-        )
+        raise HTTPException(status_code=404, detail="Course not found")
 
-    # Handle PDF removals
-    if removed_pdfs:
-        try:
-            removed_urls = json.loads(removed_pdfs)
-        except json.JSONDecodeError:
-            removed_urls = [url.strip() for url in removed_pdfs.split(',') if url.strip()]
-            print(removed_urls)
-        existing_urls = json.loads(course.pdf_urls)
+    # Update fields only if non-empty strings provided
+    if name is not None and name.strip(): course.name = name
+    if batch is not None and batch.strip(): course.batch = batch 
+    if group is not None and group.strip(): course.group = group
+    if section is not None and section.strip(): course.section = section
+    if status is not None and status.strip(): course.status = status
 
-        for url in removed_urls:
-            if url in existing_urls:
-                delete_success = delete_from_s3(url)
-                if delete_success:
-                    try:
-                        rag.delete_pdf_embeddings(url)
-                    except Exception as e:
-                        print(f"Failed to delete embeddings: {e}")
-                    existing_urls.remove(url)
-                else:
-                    print(f"Failed to delete PDF from S3: {url}")
-        
-        course.pdf_urls = json.dumps(existing_urls)
+    try:
+        # Handle PDF uploads if files provided
+        if pdfs:
+            existing_urls = json.loads(course.pdf_urls)
+            rag = get_teacher_rag(course.collection_name)
+            folder_name = f"course_pdfs/{current_teacher.id}/{course.name}"
+            
+            for pdf in pdfs:
+                if not pdf.filename:
+                    continue
+                    
+                if not pdf.content_type == 'application/pdf':
+                    raise HTTPException(status_code=400, detail="File must be PDF")
+                    
+                with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                    content = await pdf.read()
+                    temp_file.write(content)
+                    temp_file_path = temp_file.name
 
-    if pdfs:
-        existing_urls = json.loads(course.pdf_urls)
-        folder_name = f"course_pdfs/{current_teacher.id}/{name if name else course.name}"
-        
-        for pdf in pdfs:
-            if not pdf.content_type == 'application/pdf':
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"File {pdf.filename} must be a PDF"
-                )
-            
-            pdf_path = f"/tmp/{pdf.filename}"
-            with open(pdf_path, "wb") as buffer:
-                buffer.write(await pdf.read())
-            
-            pdf_url = upload_to_s3(
-                folder_name=folder_name,
-                file_name=pdf.filename,
-                file_path=pdf_path
-            )
-            
-            if pdf_url:
                 try:
-                    rag.store_pdf_embeddings(pdf_path, pdf_url)
-                except Exception as e:
-                    print(f"Failed to store embeddings: {e}")
-                existing_urls.append(pdf_url)
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to upload PDF {pdf.filename}"
-                )
-            os.remove(pdf_path)        
-        course.pdf_urls = json.dumps(existing_urls)
+                    pdf_url = upload_to_s3(
+                        folder_name=folder_name,
+                        file_name=pdf.filename,
+                        file_path=temp_file_path
+                    )
+                    if pdf_url:
+                        rag.store_pdf_embeddings(temp_file_path, pdf_url)
+                        existing_urls.append(pdf_url)
+                finally:
+                    os.unlink(temp_file_path)
+                    
+            course.pdf_urls = json.dumps(existing_urls)
 
-    if name and name != course.name:
-        old_urls = json.loads(course.pdf_urls)
-        new_urls = []
-        
-        for old_url in old_urls:
-            if old_url in (removed_urls if removed_pdfs else []):
-                continue
+        # Handle PDF removals if URLs provided
+        if removed_pdfs is not None and removed_pdfs.strip():
+            try:
+                removed_urls = json.loads(removed_pdfs)
+                existing_urls = json.loads(course.pdf_urls)
+                rag = get_teacher_rag(course.collection_name)
                 
-            file_name = old_url.split('/')[-1]
-            new_folder = f"course_pdfs/{current_teacher.id}/{name}"
-            
-            new_url = upload_to_s3(
-                folder_name=new_folder,
-                file_name=file_name,
-                file_path=f"/tmp/{file_name}"
-            )
-            
-            if new_url:
-                new_urls.append(new_url)
-                delete_from_s3(old_url)
-            else:
-                new_urls.append(old_url)
-                
-        course.pdf_urls = json.dumps(new_urls)
+                for url in removed_urls:
+                    if url in existing_urls:
+                        if delete_from_s3(url):
+                            rag.delete_pdf_embeddings(url)
+                            existing_urls.remove(url)
+                            
+                course.pdf_urls = json.dumps(existing_urls)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid removed_pdfs format")
 
-    if name: course.name = name
-    if batch: course.batch = batch
-    if group: course.group = group
-    if section: course.section = section
-    if status: course.status = status
-
-    db.commit()
-    db.refresh(course)
-
-    return {
-        "success": True,
-        "status": 200,
-        "message": "Course updated successfully",
-        "course": {
-            "id": course.id,
-            "name": course.name,
-            "batch": course.batch,
-            "group": course.group,
-            "section": course.section,
-            "status": course.status,
-            "course_code": course.course_code,
-            "pdf_urls": json.loads(course.pdf_urls)
+        db.commit()
+        return {
+            "success": True,
+            "status": 200,
+            "message": "Course updated successfully",
+            "course": {
+                "id": course.id,
+                "name": course.name,
+                "batch": course.batch,
+                "group": course.group,
+                "section": course.section,
+                "status": course.status,
+                "course_code": course.course_code,
+                "pdf_urls": json.loads(course.pdf_urls)
+            }
         }
-    }
-
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/teacher/assignments", response_model=dict)
 async def get_teacher_assignments(
@@ -540,10 +505,10 @@ async def create_assignment(
 async def update_assignment(
     course_id: int,
     assignment_id: int,
-    name: Optional[str] = Form(None),
-    description: Optional[str] = Form(None),
-    deadline: Optional[str] = Form(None),
-    grade: Optional[str] = Form(None),
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    deadline: Optional[str] = None,
+    grade: Optional[str] = None,
     question_pdf: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin)
