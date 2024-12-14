@@ -429,7 +429,7 @@ async def create_assignment(
         )
 
     # Validate PDF
-    if not question_pdf.content_type == 'application/pdf':
+    if question_pdf.content_type != 'application/pdf':
         raise HTTPException(
             status_code=400,
             detail="Question file must be a PDF"
@@ -437,17 +437,19 @@ async def create_assignment(
 
     try:
         with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            os.makedirs("temp", exist_ok=True)
             content = await question_pdf.read()
             temp_file.write(content)
             temp_file_path = temp_file.name
-        
+
+        # Sanitize and upload PDF to S3
         safe_course_name = sanitize_folder_name(course.name)
         s3_url = upload_to_s3(
             folder_name=f"course_assignments/{current_teacher.id}/{safe_course_name}",
             file_name=question_pdf.filename,
             file_path=temp_file_path
         )
-        
+
         if not s3_url:
             raise HTTPException(
                 status_code=500,
@@ -466,16 +468,22 @@ async def create_assignment(
         db.add(new_assignment)
         db.flush()
 
+        # Extract questions and answers using PDFQuestionAnswerExtractor
         pdf_extractor = PDFQuestionAnswerExtractor(
             pdf_files=[temp_file_path],
-            role="teacher",
+            teacher_pdf=temp_file_path,
+            course_id=course_id,
             assignment_id=new_assignment.id
         )
         pdf_extractor.run()
+
+        # Save results to MongoDB
         pdf_extractor.save_results_to_mongo()
 
+        # Commit the transaction in the SQL database
         db.commit()
 
+        # Remove temporary file
         os.unlink(temp_file_path)
 
         return {
@@ -483,15 +491,15 @@ async def create_assignment(
             "status": 201,
             "message": "Assignment created successfully",
             "assignment": {
-            "id": new_assignment.id,
-            "name": new_assignment.name,
-            "description": new_assignment.description,
-            "deadline": new_assignment.deadline.strftime("%Y-%m-%d %H:%M"),
-            "grade": new_assignment.grade,
-            "question_pdf_url": new_assignment.question_pdf_url,
-            "course_id": new_assignment.course_id,
-            "created_at": new_assignment.created_at,
-        },
+                "id": new_assignment.id,
+                "name": new_assignment.name,
+                "description": new_assignment.description,
+                "deadline": new_assignment.deadline.strftime("%Y-%m-%d %H:%M"),
+                "grade": new_assignment.grade,
+                "question_pdf_url": new_assignment.question_pdf_url,
+                "course_id": new_assignment.course_id,
+                "created_at": new_assignment.created_at,
+            },
         }
 
     except Exception as e:
@@ -502,7 +510,7 @@ async def create_assignment(
             status_code=500,
             detail=f"Failed to create assignment: {str(e)}"
         )
-    
+
 @router.put("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
 async def update_assignment(
     course_id: int,
@@ -510,7 +518,7 @@ async def update_assignment(
     name: Optional[str] = None,
     description: Optional[str] = None,
     deadline: Optional[str] = None,
-    grade: Optional[str] = None,
+    grade: Optional[int] = None,
     question_pdf: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin)
@@ -520,7 +528,7 @@ async def update_assignment(
         Course.id == course_id,
         Course.teacher_id == current_teacher.id
     ).first()
-    
+
     if not course:
         raise HTTPException(
             status_code=404,
@@ -531,7 +539,7 @@ async def update_assignment(
         Assignment.id == assignment_id,
         Assignment.course_id == course_id
     ).first()
-    
+
     if not assignment:
         raise HTTPException(
             status_code=404,
@@ -540,7 +548,7 @@ async def update_assignment(
 
     # Handle PDF update if provided
     if question_pdf:
-        if not question_pdf.content_type == 'application/pdf':
+        if question_pdf.content_type != 'application/pdf':
             raise HTTPException(
                 status_code=400,
                 detail="Question file must be a PDF"
@@ -556,7 +564,8 @@ async def update_assignment(
             # Process PDF for Q&A extraction
             pdf_extractor = PDFQuestionAnswerExtractor(
                 pdf_files=[temp_file_path],
-                role="teacher",
+                teacher_pdf=temp_file_path,
+                course_id=course_id,
                 assignment_id=assignment_id
             )
             pdf_extractor.run()
@@ -569,12 +578,13 @@ async def update_assignment(
                     print(f"Failed to delete old PDF: {assignment.question_pdf_url}")
 
             # Upload new PDF to S3
+            safe_course_name = sanitize_folder_name(course.name)
             pdf_url = upload_to_s3(
-                folder_name=f"course_assignments/{current_teacher.id}/{course.name}",
+                folder_name=f"course_assignments/{current_teacher.id}/{safe_course_name}",
                 file_name=question_pdf.filename,
                 file_path=temp_file_path
             )
-            
+
             if not pdf_url:
                 raise HTTPException(
                     status_code=500,
@@ -606,28 +616,25 @@ async def update_assignment(
                 detail="Invalid deadline format. Use YYYY-MM-DD HH:MM"
             )
 
-    if name: assignment.name = name
-    if description: assignment.description = description
+    if name:
+        assignment.name = name
+
+    if description:
+        assignment.description = description
+
     if grade is not None:
-        if grade.strip():  # Check if grade is not empty string
-            try:
-                grade_int = int(grade)
-                if grade_int <= 0:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Grade must be a positive integer"
-                    )
-                assignment.grade = grade_int
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Grade must be a valid integer"
-                )
+        if grade > 0:
+            assignment.grade = grade
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Grade must be a positive integer"
+            )
 
     try:
         db.commit()
         db.refresh(assignment)
-        
+
         return {
             "success": True,
             "status": 200,
@@ -636,7 +643,7 @@ async def update_assignment(
                 "id": assignment.id,
                 "name": assignment.name,
                 "description": assignment.description,
-                "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M"),
+                "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M") if assignment.deadline else None,
                 "grade": assignment.grade,
                 "question_pdf_url": assignment.question_pdf_url,
                 "course_id": assignment.course_id,
