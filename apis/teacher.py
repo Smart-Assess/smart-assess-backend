@@ -736,6 +736,7 @@ async def get_course_requests(
             "created_at": request.created_at,
             "student": {
                 "id": student.id,
+                "department":student.department,
                 "name": student.full_name,
                 "email": student.email,
                 "batch": student.batch,
