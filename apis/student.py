@@ -247,3 +247,94 @@ async def delete_submission(
         "status": 200,
         "message": "Submission deleted successfully"
     }
+    
+@router.get("/student/courses", response_model=dict)
+async def get_enrolled_courses(
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_admin)
+):
+    enrolled_courses = db.query(Course).join(StudentCourse).filter(
+        StudentCourse.student_id == current_student.id,
+        StudentCourse.status == "accepted"
+    ).all()
+
+    courses_data = []
+    for course in enrolled_courses:
+        courses_data.append({
+            "id": course.id,
+            "name": course.name,
+            "batch": course.batch,
+            "department": course.group,
+            "section": course.section
+        })
+
+    return {
+        "success": True,
+        "status": 200,
+        "courses": courses_data
+    }
+
+@router.get("/student/course/{course_id}/materials", response_model=dict)
+async def get_course_materials(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_admin)
+):
+    # Verify student is enrolled
+    enrollment = db.query(StudentCourse).filter(
+        StudentCourse.student_id == current_student.id,
+        StudentCourse.course_id == course_id,
+        StudentCourse.status == "accepted"
+    ).first()
+    
+    if not enrollment:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not enrolled in this course"
+        )
+    
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found"
+        )
+
+    return {
+        "success": True,
+        "status": 200,
+        "course_materials": course.pdf_urls
+    }
+    
+@router.get("/student/results", response_model=dict)
+async def get_student_results(
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_admin)
+):
+    submissions = db.query(AssignmentSubmission).filter(
+        AssignmentSubmission.student_id == current_student.id
+    ).all()
+
+    results_data = []
+    for submission in submissions:
+        evaluations = db.query(AssignmentEvaluation).filter(
+            AssignmentEvaluation.submission_id == submission.id
+        ).all()
+
+        for evaluation in evaluations:
+            results_data.append({
+                "assignment_id": submission.assignment_id,
+                "course_id": submission.assignment.course_id,
+                "total_score": evaluation.total_score,
+                "plagiarism_score": evaluation.plagiarism_score,
+                "ai_detection_score": evaluation.ai_detection_score,
+                "grammar_score": evaluation.grammar_score,
+                "feedback": evaluation.feedback,
+                "evaluated_at": evaluation.created_at.strftime("%Y-%m-%d %H:%M")
+            })
+
+    return {
+        "success": True,
+        "status": 200,
+        "results": results_data
+    }
