@@ -166,16 +166,6 @@ async def submit_assignment(
         with open(pdf_path, "wb") as buffer:
             buffer.write(await submission_pdf.read())
 
-        # Extract Q&A and store in MongoDB
-        extractor = PDFQuestionAnswerExtractor(
-            pdf_files=[pdf_path],
-            role="student",
-            student_id=current_student.student_id,
-            assignment_id=assignment_id
-        )
-        extractor.run()
-        extractor.save_results_to_mongo()
-
         # Upload to S3
         pdf_url = upload_to_s3(
             folder_name=f"assignment_submissions/{assignment.course_id}/{assignment_id}",
@@ -338,3 +328,81 @@ async def get_student_results(
         "status": 200,
         "results": results_data
     }
+
+@router.get("/student/assignment/{assignment_id}/result", response_model=dict)
+async def get_assignment_result(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_admin)
+):
+    # Verify submission exists
+    submission = db.query(AssignmentSubmission).filter(
+        AssignmentSubmission.assignment_id == assignment_id,
+        AssignmentSubmission.student_id == current_student.id
+    ).first()
+    
+    if not submission:
+        raise HTTPException(
+            status_code=404,
+            detail="No submission found for this assignment"
+        )
+
+    # Get SQL evaluation data
+    evaluation = db.query(AssignmentEvaluation).filter(
+        AssignmentEvaluation.submission_id == submission.id
+    ).first()
+
+    # Get MongoDB detailed results
+    client = MongoClient(os.getenv("MONGO_URI"))
+    db_mongo = client['FYP']
+    
+    try:
+        submission_data = db_mongo.submissions.find_one({
+            "assignment_id": assignment_id,
+            "student_id": current_student.id,
+            "PDF_File": submission.submission_pdf_url
+        })
+
+        if not submission_data:
+            raise HTTPException(
+                status_code=404,
+                detail="Detailed evaluation results not found"
+            )
+
+        # Convert MongoDB ObjectIds to strings
+        submission_data["_id"] = str(submission_data["_id"])
+
+        result_data = {
+            "submission_id": submission.id,
+            "submitted_at": submission.submitted_at.strftime("%Y-%m-%d %H:%M"),
+            "pdf_url": submission.submission_pdf_url,
+            "total_score": submission_data.get("total_score", "Not evaluated"),
+            "questions": submission_data.get("questions", []),
+            "feedback": evaluation.feedback if evaluation else None,
+            "scores": {
+                "plagiarism": evaluation.plagiarism_score if evaluation else None,
+                "ai_detection": evaluation.ai_detection_score if evaluation else None,
+                "grammar": evaluation.grammar_score if evaluation else None
+            }
+        }
+
+        # Clean up null values
+        result_data["scores"] = {
+            k: v for k, v in result_data["scores"].items() 
+            if v is not None
+        }
+
+        return {
+            "success": True,
+            "status": 200,
+            "result": result_data
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch evaluation results: {str(e)}"
+        )
+    
+    finally:
+        client.close()

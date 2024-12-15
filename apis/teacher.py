@@ -4,7 +4,6 @@ import re
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 from pymongo import MongoClient
-from sqlalchemy.exc import IntegrityError
 from fastapi import (
     APIRouter,
     Depends,
@@ -12,11 +11,11 @@ from fastapi import (
     Form,
     HTTPException,
     UploadFile,
-    status,
 )
 from sqlalchemy.orm import Session
 from apis.auth import get_current_admin
 from models.models import *
+from models.pydantic_model import EvaluationRequest
 from utils.assingment_score import AssignmentScoreCalculator
 from utils.context_score import SubmissionScorer
 from utils.dependencies import get_db
@@ -24,9 +23,18 @@ from typing import List, Optional
 from bestrag import BestRAG
 from utils.plagiarism import PDFQuestionAnswerExtractor
 from utils.s3 import delete_from_s3, download_from_s3, upload_to_s3
-from utils.clean_text import clean_and_tokenize_text
-from utils.bleurt.bleurt.score import BleurtScorer
 # from utils.security import get_password_hash
+from bson import ObjectId
+import json
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        if isinstance(o, datetime):
+            return o.isoformat()
+        return super().default(o)
+
 import os
 from dotenv import load_dotenv
 
@@ -369,41 +377,47 @@ async def get_teacher_assignments(
 ):
     offset = (page - 1) * limit
     
-    total = db.query(Assignment)\
-        .join(Course)\
-        .filter(Course.teacher_id == current_teacher.id)\
-        .count()
-    
-    assignments = db.query(Assignment, Course)\
-        .join(Course)\
-        .filter(Course.teacher_id == current_teacher.id)\
-        .order_by(Assignment.created_at.desc())\
-        .offset(offset)\
-        .limit(limit)\
-        .all()
-    
-    assignments_data = []
-    for assignment, course in assignments:
-        assignments_data.append({
-            "id": assignment.id,
-            "name": assignment.name,
-            "batch": course.batch,
-            "department": course.group,
-            "section": course.section,
-            "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M"),
-            "grade": assignment.grade
-        })
+    try:
+        total = db.query(Assignment)\
+            .join(Course)\
+            .filter(Course.teacher_id == current_teacher.id)\
+            .count()
+        
+        assignments = db.query(Assignment, Course)\
+            .join(Course)\
+            .filter(Course.teacher_id == current_teacher.id)\
+            .order_by(Assignment.created_at.desc())\
+            .offset(offset)\
+            .limit(limit)\
+            .all()
+        
+        assignments_data = []
+        for assignment, course in assignments:
+            assignments_data.append({
+                "id": assignment.id,
+                "name": assignment.name,
+                "description": assignment.description,
+                "batch": course.batch,
+                "department": course.group,
+                "section": course.section,
+                "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M"),
+                "grade": assignment.grade,
+                "course_id": course.id,
+                "course_name": course.name
+            })
 
-    return {
-        "success": True,
-        "status": 200,
-        "total": total,
-        "page": page,
-        "total_pages": (total + limit - 1) // limit,
-        "assignments": assignments_data,
-        "has_previous": page > 1,
-        "has_next": (offset + limit) < total
-    }
+        return {
+            "success": True,
+            "status": 200,
+            "total": total,
+            "page": page,
+            "total_pages": (total + limit - 1) // limit,
+            "assignments": assignments_data,
+            "has_previous": page > 1,
+            "has_next": (offset + limit) < total
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/teacher/course/{course_id}/assignments", response_model=dict)
 async def get_course_assignments(
@@ -455,7 +469,6 @@ async def create_assignment(
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin)
 ):
-
     course = db.query(Course).filter(
         Course.id == course_id,
         Course.teacher_id == current_teacher.id
@@ -474,12 +487,37 @@ async def create_assignment(
             detail="Question file must be a PDF"
         )
 
+    # Parse the deadline string into a datetime object
+    try:
+        deadline_dt = datetime.strptime(deadline, "%Y-%m-%d %H:%M")
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid deadline format. Use 'YYYY-MM-DD HH:MM'."
+        )
+
     try:
         with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
             os.makedirs("temp", exist_ok=True)
             content = await question_pdf.read()
             temp_file.write(content)
             temp_file_path = temp_file.name
+
+        # Validate the format of the question PDF
+        extractor = PDFQuestionAnswerExtractor(
+            pdf_files=[],
+            teacher_pdf=temp_file_path,
+            course_id=course_id,
+            assignment_id=0  # Dummy assignment ID for validation
+        )
+        teacher_text = extractor.extract_text_from_pdf(temp_file_path)
+        valid_format = any("Question#" in page and "Answer#" in page for page in teacher_text)
+        
+        if not valid_format:
+            raise HTTPException(
+                status_code=400,
+                detail="Assignment PDF is not in the correct format. It must contain 'Question#' and 'Answer#'."
+            )
 
         # Sanitize and upload PDF to S3
         safe_course_name = sanitize_folder_name(course.name)
@@ -500,55 +538,30 @@ async def create_assignment(
             course_id=course_id,
             name=name,
             description=description,
-            deadline=deadline,
+            deadline=deadline_dt,
             grade=grade,
             question_pdf_url=s3_url
         )
         db.add(new_assignment)
-        db.flush()
-
-        # Extract questions and answers using PDFQuestionAnswerExtractor
-        pdf_extractor = PDFQuestionAnswerExtractor(
-            pdf_files=[temp_file_path],
-            teacher_pdf=temp_file_path,
-            course_id=course_id,
-            assignment_id=new_assignment.id
-        )
-        pdf_extractor.run()
-
-        # Save results to MongoDB
-        pdf_extractor.save_results_to_mongo()
-
-        # Commit the transaction in the SQL database
         db.commit()
-
-        # Remove temporary file
-        os.unlink(temp_file_path)
+        db.refresh(new_assignment)
 
         return {
             "success": True,
             "status": 201,
-            "message": "Assignment created successfully",
             "assignment": {
                 "id": new_assignment.id,
                 "name": new_assignment.name,
                 "description": new_assignment.description,
                 "deadline": new_assignment.deadline.strftime("%Y-%m-%d %H:%M"),
                 "grade": new_assignment.grade,
-                "question_pdf_url": new_assignment.question_pdf_url,
-                "course_id": new_assignment.course_id,
-                "created_at": new_assignment.created_at,
-            },
+                "question_pdf_url": new_assignment.question_pdf_url
+            }
         }
 
-    except Exception as e:
-        db.rollback()
+    finally:
         if os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create assignment: {str(e)}"
-        )
+            os.remove(temp_file_path)
 
 @router.put("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
 async def update_assignment(
@@ -556,7 +569,7 @@ async def update_assignment(
     assignment_id: int,
     name: Optional[str] = None,
     description: Optional[str] = None,
-    deadline: Optional[str] = None,
+    deadline: Optional[str] = None, # YYYY-MM-DD HH:MM
     grade: Optional[int] = None,
     question_pdf: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
@@ -586,7 +599,7 @@ async def update_assignment(
         )
 
     # Handle PDF update if provided
-    if question_pdf:
+    if question_pdf and not isinstance(question_pdf, str):
         if question_pdf.content_type != 'application/pdf':
             raise HTTPException(
                 status_code=400,
@@ -600,15 +613,21 @@ async def update_assignment(
                 temp_file.write(content)
                 temp_file_path = temp_file.name
 
-            # Process PDF for Q&A extraction
-            pdf_extractor = PDFQuestionAnswerExtractor(
-                pdf_files=[temp_file_path],
+            # Validate the format of the question PDF
+            extractor = PDFQuestionAnswerExtractor(
+                pdf_files=[],
                 teacher_pdf=temp_file_path,
                 course_id=course_id,
                 assignment_id=assignment_id
             )
-            pdf_extractor.run()
-            pdf_extractor.save_results_to_mongo()
+            teacher_text = extractor.extract_text_from_pdf(temp_file_path)
+            valid_format = any("Question#" in page and "Answer#" in page for page in teacher_text)
+            
+            if not valid_format:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Assignment PDF is not in the correct format. It must contain 'Question#' and 'Answer#'."
+                )
 
             # Delete old PDF from S3
             if assignment.question_pdf_url:
@@ -695,6 +714,7 @@ async def update_assignment(
             status_code=500,
             detail=f"Failed to update assignment: {str(e)}"
         )
+
 
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
 async def get_assignment(
@@ -931,67 +951,84 @@ async def get_assignment_submissions(
         "has_previous": page > 1,
         "has_next": (offset + limit) < total
     }
-
+    
 
 @router.post("/teacher/{course_id}/assignment/{assignment_id}/evaluate", response_model=dict)
 async def evaluate_submissions(
     course_id: int,
     assignment_id: int,
-    submission_ids: List[int] = Form(...),
-    enable_plagiarism: bool = Form(False),
-    enable_ai_detection: bool = Form(False), 
-    enable_grammar: bool = Form(False),
+    request: EvaluationRequest,
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
 ):
-    # Verify assignment and course
-    assignment = db.query(Assignment)\
-        .join(Course)\
-        .filter(
-            Assignment.id == assignment_id,
-            Course.teacher_id == current_teacher.id
-        ).first()
-    
-    if not assignment:
-        raise HTTPException(status_code=404, detail="Assignment not found or no access")
+    # Initialize MongoDB client
+    client = MongoClient(os.getenv("MONGO_URI"))
+    db_mongo = client['FYP']
 
-    course = db.query(Course).filter(Course.id == course_id).first()
-    if not course:
-        raise HTTPException(status_code=404, detail="Course not found")
-
-    # Initialize RAG for context scoring
-    rag = get_teacher_rag(course.collection_name)
-    print("RAG",rag)
-    evaluation_results = []
-
-    # Process each submission
-    for submission_id in submission_ids:
-        submission = db.query(AssignmentSubmission).filter_by(id=submission_id).first()
-        print("submission",submission)
-        if not submission:
-            continue
-
-        question_results = {}
+    try:
+        # Verify assignment and course
+        assignment = db.query(Assignment)\
+            .join(Course)\
+            .filter(
+                Assignment.id == assignment_id,
+                Course.teacher_id == current_teacher.id
+            ).first()
         
-        try:
-            # Create temporary file for submission PDF
-            with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-                # Download submission PDF from S3
-                download_from_s3(submission.submission_pdf_url, temp_file.name)
-                submission_pdf_path = temp_file.name
-                print("submission_pdf_path",submission_pdf_path)
+        if not assignment:
+            raise HTTPException(status_code=404, detail="Assignment not found or no access")
 
+        course = db.query(Course).filter(Course.id == course_id).first()
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found")
+
+        # Initialize RAG for context scoring
+        rag = get_teacher_rag(course.collection_name)
+        evaluation_results = []
+        temp_files = []
+
+        try:
+            # Download teacher PDF
+            teacher_temp_file = NamedTemporaryFile(delete=False, suffix='.pdf')
+            download_from_s3(assignment.question_pdf_url, teacher_temp_file.name)
+            temp_files.append(teacher_temp_file.name)
+            teacher_pdf_path = teacher_temp_file.name
+
+            # Download all submissions for comparison
+            submission_pdf_paths = []
+            for submission_id in request.submission_ids:
+                submission = db.query(AssignmentSubmission).filter_by(id=submission_id).first()
+                if not submission:
+                    continue
+                
+                temp_file = NamedTemporaryFile(delete=False, suffix='.pdf')
+                download_from_s3(submission.submission_pdf_url, temp_file.name)
+                submission_pdf_paths.append(temp_file.name)
+                temp_files.append(temp_file.name)
+
+            # Process each requested submission
+            for submission_id in request.submission_ids:
+                submission = db.query(AssignmentSubmission).filter_by(id=submission_id).first()
+                if not submission:
+                    continue
+
+                question_results = {}
+                
                 # 1. Run Plagiarism Detection
-                if enable_plagiarism:
+                if request.enable_plagiarism:
                     plagiarism_detector = PDFQuestionAnswerExtractor(
-                        pdf_files=[submission_pdf_path],
-                        teacher_pdf=assignment.question_pdf_url,
+                        pdf_files=submission_pdf_paths,
+                        teacher_pdf=teacher_pdf_path,
                         course_id=course_id,
                         assignment_id=assignment_id,
                         student_id=submission.student_id
                     )
                     plagiarism_results = plagiarism_detector.run()
-                    question_results.update(plagiarism_results["results"][0]["question_results"])
+                    
+                    # Find results for current submission
+                    for result in plagiarism_results["results"]:
+                        if str(submission.student_id) == str(result["student_id"]):
+                            question_results.update(result["question_results"])
+                            break
 
                 # 2. Run Context Scoring
                 context_scorer = SubmissionScorer(rag)
@@ -1000,7 +1037,7 @@ async def evaluate_submissions(
                     assignment_id=assignment_id,
                     student_id=submission.student_id
                 )
-                print("context_scores",context_scores)
+                
                 # Merge context scores
                 if context_scores:
                     for result in context_scores:
@@ -1025,22 +1062,63 @@ async def evaluate_submissions(
                     student_id=submission.student_id,
                     question_results=question_results,
                     enabled_components={
-                        'context': True,  # Context scoring always enabled
-                        'plagiarism': enable_plagiarism,
-                        'ai_detection': enable_ai_detection,
-                        'grammar': enable_grammar
+                        'context': True,
+                        'plagiarism': request.enable_plagiarism,
+                        'ai_detection': request.enable_ai_detection,
+                        'grammar': request.enable_grammar
                     }
-                    )
+                )
+
+                # Clean question results
+                cleaned_question_results = {}
+                for q_key, result in question_results.items():
+                    cleaned_scores = {
+                        k: v for k, v in result.items() 
+                        if v is not None and v != 0
+                    }
+                    if cleaned_scores:
+                        cleaned_question_results[q_key] = cleaned_scores
+
+                # Prepare MongoDB document combining cleaned results and final evaluation
+                mongo_doc = {
+                    "course_id": course_id,
+                    "assignment_id": assignment_id,
+                    "student_id": submission.student_id,
+                    "PDF_File": submission.submission_pdf_url,
+                    "QA_Results": final_evaluation.get("QA_Results", {}),
+                    "questions": final_evaluation.get("questions", []),
+                    "submission_id": submission_id,
+                    "total_score": final_evaluation.get("total_score"),
+                    "submitted_at": datetime.utcnow(),
+                    "question_results": cleaned_question_results
+                }
+
+                # Save to MongoDB - single operation per submission
+                db_mongo.submissions.update_one(
+                    {
+                        "course_id": course_id,
+                        "assignment_id": assignment_id,
+                        "student_id": submission.student_id,
+                        "PDF_File": submission.submission_pdf_url
+                    },
+                    {"$set": mongo_doc},
+                    upsert=True
+                )
 
                 evaluation_results.append(final_evaluation)
 
-            # Cleanup temp files
-            os.unlink(submission_pdf_path)
+        finally:
+            # Cleanup all temporary files
+            for temp_file in temp_files:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
 
-        except Exception as e:
-            if 'submission_pdf_path' in locals() and os.path.exists(submission_pdf_path):
-                os.unlink(submission_pdf_path)
-            raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+    
+    finally:
+        # Close MongoDB connection
+        client.close()
 
     return {
         "success": True,
@@ -1048,3 +1126,181 @@ async def evaluate_submissions(
         "message": "Evaluation completed",
         "results": evaluation_results
     }
+
+@router.get("/teacher/course/{course_id}/assignment/{assignment_id}/submission/{submission_id}", response_model=dict)
+async def get_submission_details(
+    course_id: int,
+    assignment_id: int,
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin)
+):
+    # Verify course and assignment ownership
+    course = db.query(Course).filter(
+        Course.id == course_id,
+        Course.teacher_id == current_teacher.id
+    ).first()
+
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found or you don't have access"
+        )
+
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.course_id == course_id
+    ).first()
+
+    if not assignment:
+        raise HTTPException(
+            status_code=404,
+            detail="Assignment not found"
+        )
+
+    submission = db.query(AssignmentSubmission).filter(
+        AssignmentSubmission.id == submission_id,
+        AssignmentSubmission.assignment_id == assignment_id
+    ).first()
+
+    if not submission:
+        raise HTTPException(
+            status_code=404,
+            detail="Submission not found"
+        )
+
+    # Fetch submission details from MongoDB
+    client = MongoClient(os.getenv("MONGO_URI"))
+    db_mongo = client['FYP']
+    
+    # Check both submissions and assignment_evaluations collections
+    submission_data = None
+    
+    # First check submissions collection
+    submission_data = db_mongo.submissions.find_one({
+        "course_id": course_id,
+        "assignment_id": assignment_id,
+        "student_id": submission.student_id,
+        "PDF_File": submission.submission_pdf_url
+    })
+
+    if not submission_data:
+        # Try assignment_evaluations collection
+        submission_data = db_mongo.assignment_evaluations.find_one({
+            "course_id": course_id,
+            "assignment_id": assignment_id,
+            "student_id": submission.student_id,
+            "submission_id": submission_id
+        })
+
+    if not submission_data:
+        raise HTTPException(
+            status_code=404,
+            detail="Submission details not found in MongoDB"
+        )
+
+    # Convert MongoDB document to serializable format
+    serializable_data = json.loads(json.dumps(submission_data, cls=JSONEncoder))
+
+    return {
+        "success": True,
+        "status": 200,
+        "submission": serializable_data
+    }
+
+
+@router.get("/teacher/course/{course_id}/assignment/{assignment_id}/total-scores", response_model=dict)
+async def get_total_scores(
+    course_id: int,
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin)
+):
+    # Verify course and assignment ownership
+    course = db.query(Course).filter(
+        Course.id == course_id,
+        Course.teacher_id == current_teacher.id
+    ).first()
+
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found or you don't have access"
+        )
+
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.course_id == course_id
+    ).first()
+
+    if not assignment:
+        raise HTTPException(
+            status_code=404,
+            detail="Assignment not found"
+        )
+
+    submissions = db.query(AssignmentSubmission, Student).join(Student).filter(
+        AssignmentSubmission.assignment_id == assignment_id
+    ).all()
+
+    # Initialize MongoDB connection
+    client = MongoClient(os.getenv("MONGO_URI"))
+    db_mongo = client['FYP']
+    
+    try:
+        total_scores_data = []
+        for submission, student in submissions:
+            submission_data = db_mongo.submissions.find_one({
+                "course_id": course_id,
+                "assignment_id": assignment_id,
+                "student_id": submission.student_id,
+                "PDF_File": submission.submission_pdf_url
+            })
+
+            if submission_data:
+                # Clean up scores data
+                scores = {
+                    "student_id": student.student_id,
+                    "name": student.full_name,
+                    "batch": student.batch,
+                    "department": student.department,
+                    "section": student.section
+                }
+
+                # Add non-null scores from MongoDB
+                for score_type in ["total_score", "plagiarism_score", "contextual_score", "ai_score", "grammar_score"]:
+                    if submission_data.get(score_type) is not None:
+                        scores[score_type] = submission_data[score_type]
+
+                # Add component scores from questions if available
+                if "questions" in submission_data:
+                    component_scores = {}
+                    for question in submission_data["questions"]:
+                        if "component_scores" in question:
+                            for comp, score in question["component_scores"].items():
+                                if score != 0 and score is not None:
+                                    if comp not in component_scores:
+                                        component_scores[comp] = []
+                                    component_scores[comp].append(score)
+                    
+                    # Calculate averages for component scores
+                    for comp, scores_list in component_scores.items():
+                        if scores_list:
+                            scores[f"avg_{comp}_score"] = round(sum(scores_list) / len(scores_list), 4)
+
+                total_scores_data.append(scores)
+
+        # Convert MongoDB ObjectIds to strings
+        serializable_data = json.loads(json.dumps(total_scores_data, cls=JSONEncoder))
+
+        return {
+            "success": True,
+            "status": 200,
+            "total_scores": serializable_data
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch scores: {str(e)}")
+    
+    finally:
+        client.close()
