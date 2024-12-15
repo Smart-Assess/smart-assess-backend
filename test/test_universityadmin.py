@@ -79,9 +79,9 @@ def test_add_student():
     
     data = {
         "full_name": "Test Student",
-        "student_id": "S123",
+        "student_id": "S124",
         "department": "Computer Science",
-        "email": "s@gmail.com",
+        "email": "s1@gmail.com",
         "batch": "2024",
         "section": "A",
         "password": "12345"
@@ -110,7 +110,7 @@ def test_add_student():
         print(f"Error adding student: {str(e)}")
 
 if __name__ == "__main__":
-    print("Testing Teacher Creation:")
-    test_add_teacher()
+    # print("Testing Teacher Creation:")
+    # test_add_teacher()
     print("\nTesting Student Creation:")
     test_add_student()
