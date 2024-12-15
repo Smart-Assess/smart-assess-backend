@@ -727,6 +727,10 @@ async def get_assignment(
             detail="Assignment not found"
         )
 
+    deadline_str = assignment.deadline.strftime("%Y-%m-%d %H:%M")
+    deadline_date = assignment.deadline.strftime("%Y-%m-%d")
+    deadline_time = assignment.deadline.strftime("%H:%M")
+
     return {
         "success": True,
         "status": 200,
@@ -734,7 +738,9 @@ async def get_assignment(
             "id": assignment.id,
             "name": assignment.name,
             "description": assignment.description,
-            "deadline": assignment.deadline.strftime("%I%p %d/%b/%Y"),
+            "deadline": deadline_str,
+            "deadline_date": deadline_date,
+            "deadline_time": deadline_time,
             "grade": assignment.grade,
             "question_pdf_url": assignment.question_pdf_url,
             "course_id": assignment.course_id,
