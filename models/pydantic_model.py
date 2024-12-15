@@ -8,7 +8,6 @@ class OAuth2EmailRequestForm:
         self.password = password
 
 class EvaluationRequest(BaseModel):
-    submission_ids: List[int]
     enable_plagiarism: bool = False
-    enable_ai_detection: bool = False
+    enable_ai_detection: bool = False  
     enable_grammar: bool = False

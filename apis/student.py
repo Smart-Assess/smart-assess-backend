@@ -1,5 +1,6 @@
 import os
 from fastapi import APIRouter, Depends, File, HTTPException, Form, UploadFile
+from pymongo import MongoClient
 from sqlalchemy.orm import Session
 from models.models import *
 from utils.dependencies import get_db
