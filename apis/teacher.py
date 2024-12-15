@@ -964,6 +964,8 @@ async def evaluate_submissions(
     # Initialize MongoDB client
     client = MongoClient(os.getenv("MONGO_URI"))
     db_mongo = client['FYP']
+    evaluation_results = []
+    temp_files = []
 
     try:
         # Verify assignment and course
@@ -981,42 +983,58 @@ async def evaluate_submissions(
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
+        # Get all submissions for this assignment
+        submissions = db.query(AssignmentSubmission).filter(
+            AssignmentSubmission.assignment_id == assignment_id
+        ).all()
+
+        if not submissions:
+            raise HTTPException(status_code=404, detail="No submissions found for this assignment")
+
         # Initialize RAG for context scoring
         rag = get_teacher_rag(course.collection_name)
-        evaluation_results = []
-        temp_files = []
 
         try:
-            # Download teacher PDF
+            # Download teacher PDF once
             teacher_temp_file = NamedTemporaryFile(delete=False, suffix='.pdf')
             download_from_s3(assignment.question_pdf_url, teacher_temp_file.name)
             temp_files.append(teacher_temp_file.name)
             teacher_pdf_path = teacher_temp_file.name
 
-            # Download all submissions for comparison
-            submission_pdf_paths = []
-            for submission_id in request.submission_ids:
-                submission = db.query(AssignmentSubmission).filter_by(id=submission_id).first()
-                if not submission:
-                    continue
-                
+            # Download all submission PDFs
+            submission_paths = {}
+            for submission in submissions:
                 temp_file = NamedTemporaryFile(delete=False, suffix='.pdf')
                 download_from_s3(submission.submission_pdf_url, temp_file.name)
-                submission_pdf_paths.append(temp_file.name)
+                submission_paths[submission.id] = temp_file.name
                 temp_files.append(temp_file.name)
 
-            # Process each requested submission
-            for submission_id in request.submission_ids:
-                submission = db.query(AssignmentSubmission).filter_by(id=submission_id).first()
-                if not submission:
-                    continue
+            # Process each submission
+            for submission in submissions:
+                submission_pdf_path = submission_paths[submission.id]
+
+                # Extract QA pairs regardless of plagiarism setting
+                base_extractor = PDFQuestionAnswerExtractor(
+                    pdf_files=[submission_pdf_path],
+                    teacher_pdf=teacher_pdf_path,
+                    course_id=course_id,
+                    assignment_id=assignment_id,
+                    student_id=submission.student_id
+                )
+                qa_results = base_extractor.extract_qa_only()
 
                 question_results = {}
-                
-                # 1. Run Plagiarism Detection
+
+                # 1. Run Plagiarism Detection if enabled
                 if request.enable_plagiarism:
+                    # Get paths of other submissions for comparison
+                    other_paths = [
+                        path for sid, path in submission_paths.items() 
+                        if sid != submission.id
+                    ]
+                    
                     plagiarism_detector = PDFQuestionAnswerExtractor(
-                        pdf_files=submission_pdf_paths,
+                        pdf_files=[submission_pdf_path] + other_paths,
                         teacher_pdf=teacher_pdf_path,
                         course_id=course_id,
                         assignment_id=assignment_id,
@@ -1024,7 +1042,6 @@ async def evaluate_submissions(
                     )
                     plagiarism_results = plagiarism_detector.run()
                     
-                    # Find results for current submission
                     for result in plagiarism_results["results"]:
                         if str(submission.student_id) == str(result["student_id"]):
                             question_results.update(result["question_results"])
@@ -1035,7 +1052,8 @@ async def evaluate_submissions(
                 context_scores = context_scorer.calculate_scores(
                     course_id=course_id,
                     assignment_id=assignment_id,
-                    student_id=submission.student_id
+                    student_id=submission.student_id,
+                    qa_results=qa_results
                 )
                 
                 # Merge context scores
@@ -1056,7 +1074,7 @@ async def evaluate_submissions(
                 )
 
                 final_evaluation = score_calculator.calculate_submission_evaluation(
-                    submission_id=submission_id,
+                    submission_id=submission.id,
                     course_id=course_id,
                     assignment_id=assignment_id,
                     student_id=submission.student_id,
@@ -1079,21 +1097,21 @@ async def evaluate_submissions(
                     if cleaned_scores:
                         cleaned_question_results[q_key] = cleaned_scores
 
-                # Prepare MongoDB document combining cleaned results and final evaluation
+                # Prepare MongoDB document
                 mongo_doc = {
                     "course_id": course_id,
                     "assignment_id": assignment_id,
                     "student_id": submission.student_id,
                     "PDF_File": submission.submission_pdf_url,
-                    "QA_Results": final_evaluation.get("QA_Results", {}),
+                    "QA_Results": qa_results,
                     "questions": final_evaluation.get("questions", []),
-                    "submission_id": submission_id,
+                    "submission_id": submission.id,
                     "total_score": final_evaluation.get("total_score"),
                     "submitted_at": datetime.utcnow(),
                     "question_results": cleaned_question_results
                 }
 
-                # Save to MongoDB - single operation per submission
+                # Save to MongoDB
                 db_mongo.submissions.update_one(
                     {
                         "course_id": course_id,
@@ -1108,7 +1126,7 @@ async def evaluate_submissions(
                 evaluation_results.append(final_evaluation)
 
         finally:
-            # Cleanup all temporary files
+            # Cleanup temporary files
             for temp_file in temp_files:
                 if os.path.exists(temp_file):
                     os.unlink(temp_file)
@@ -1123,7 +1141,7 @@ async def evaluate_submissions(
     return {
         "success": True,
         "status": 200,
-        "message": "Evaluation completed",
+        "message": f"Evaluated {len(submissions)} submissions successfully",
         "results": evaluation_results
     }
 
