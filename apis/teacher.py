@@ -431,11 +431,11 @@ async def get_course_assignments(
         assignments_data.append({
             "id": assignment.id,
             "name": assignment.name,
-            "batch": course.batch,
-            "department": course.group,
-            "section": course.section,
+            "description": assignment.description,
             "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M"),
-            "grade": assignment.grade
+            "grade": assignment.grade,
+            "question_pdf_url": assignment.question_pdf_url,
+            "created_at": assignment.created_at.strftime("%Y-%m-%d %H:%M")
         })
 
     return {
@@ -443,7 +443,6 @@ async def get_course_assignments(
         "status": 200,
         "assignments": assignments_data
     }
-
   
 @router.post("/teacher/course/{course_id}/assignment", response_model=dict)
 async def create_assignment(
@@ -855,20 +854,31 @@ async def update_course_request(
         }
     }
 
-@router.get("/teacher/assignment/{assignment_id}/submissions", response_model=dict)
+@router.get("/teacher/course/{course_id}/assignment/{assignment_id}/submissions", response_model=dict)
 async def get_assignment_submissions(
+    course_id: int,
     assignment_id: int,
     page: int = 1,
     limit: int = 10,
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin)
 ):
-    assignment = db.query(Assignment)\
-        .join(Course)\
-        .filter(
-            Assignment.id == assignment_id,
-            Course.teacher_id == current_teacher.id
-        ).first()
+    # Verify course and assignment ownership
+    course = db.query(Course).filter(
+        Course.id == course_id,
+        Course.teacher_id == current_teacher.id
+    ).first()
+    
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found or you don't have access"
+        )
+
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.course_id == course_id
+    ).first()
     
     if not assignment:
         raise HTTPException(
@@ -921,7 +931,7 @@ async def get_assignment_submissions(
         "has_previous": page > 1,
         "has_next": (offset + limit) < total
     }
-    
+
 
 @router.post("/teacher/{course_id}/assignment/{assignment_id}/evaluate", response_model=dict)
 async def evaluate_submissions(
