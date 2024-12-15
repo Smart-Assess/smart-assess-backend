@@ -1,10 +1,12 @@
-import PyPDF2
-import re
 import pymongo
+import requests
+from tempfile import NamedTemporaryFile
 from typing import List, Dict, Optional
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import PyPDF2
+import re
 
 class PDFQuestionAnswerExtractor:
     def __init__(
@@ -42,7 +44,9 @@ class PDFQuestionAnswerExtractor:
         # First extract teacher questions
         teacher_text = self.extract_text_from_pdf(self.teacher_pdf)
         for page in teacher_text:
-            self.teacher_questions.update(self.parse_questions_answers(page))
+            page_questions = self.parse_questions_answers(page)
+            print("Teacher Page Questions:", page_questions)
+            self.teacher_questions.update(page_questions)
 
         # Extract student answers
         for pdf_file in self.pdf_files:
@@ -224,6 +228,14 @@ class PDFQuestionAnswerExtractor:
     def extract_text_from_pdf(self, pdf_file: str) -> List[str]:
         text_by_page = []
         try:
+            if pdf_file.startswith("http://") or pdf_file.startswith("https://"):
+                response = requests.get(pdf_file)
+                response.raise_for_status()
+                with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                    temp_file.write(response.content)
+                    temp_file_path = temp_file.name
+                pdf_file = temp_file_path
+
             with open(pdf_file, "rb") as file:
                 reader = PyPDF2.PdfReader(file)
                 for page in reader.pages:
@@ -257,14 +269,15 @@ class PDFQuestionAnswerExtractor:
     
     def clean_text(self, text: str) -> str:
         return ' '.join(text.split()).strip()
+
 # # Initialize and run the extra/ctor
 if __name__ == "__main__":
     extractor = PDFQuestionAnswerExtractor(
-    pdf_files=["/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf", "/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf"],
+    pdf_files=["/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf", "/home/samadpls/proj/fyp/smart-assess-backend/p1.pdf"],
     teacher_pdf="/home/samadpls/proj/fyp/smart-assess-backend/teacher.pdf",
     course_id=12,
     assignment_id=456,
-    student_id="student1"
+    student_id="localtest"
 )
 
     results = extractor.run()
