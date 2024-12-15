@@ -1,3 +1,4 @@
+import re
 from .bleurt.bleurt import score as bleurt_score
 from typing import Dict, Optional
 import numpy as np
@@ -10,8 +11,27 @@ class SubmissionScorer:
         self.mongo_client = MongoClient("mongodb+srv://smartassessfyp:SobazFCcD4HHDE0j@fyp.ad9fx.mongodb.net/?retryWrites=true&w=majority")
         self.db = self.mongo_client['FYP']
 
-    def clean_and_tokenize_text(self, text: str) -> str:
-        return text
+    def clean_and_tokenize_text(self, data):
+        cleaned_texts = ""
+        for point in data.points:
+            if 'text' in point.payload:
+                raw_text = point.payload['text']
+
+                cleaned_text = re.sub(r'[●■○]', '', raw_text)
+                cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+
+                tokens = cleaned_text.split()
+
+                filtered_tokens = [
+                    token.lower()
+                    for token in tokens
+                    if token.isalnum() 
+                ]
+                cleaned_text = ' '.join(filtered_tokens)
+                cleaned_texts += cleaned_text
+        return cleaned_texts
+
+
     
     def calculate_scores(
         self, 
@@ -36,11 +56,12 @@ class SubmissionScorer:
                         rag_results = self.rag.search(question)
                         if rag_results:
                             clean_reference = self.clean_and_tokenize_text(rag_results)
+                            q_input= "QUESTION: " + question + "\n\n" 
                             
                             # Calculate BLEURT score
                             context_score = float(np.round(
                                 self.scorer.score(
-                                    references=[clean_reference],
+                                    references=[q_input +clean_reference],
                                     candidates=[answer]
                                 ), 
                                 4

@@ -40,6 +40,22 @@ class PDFQuestionAnswerExtractor:
         self.qa_collection = self.db.submissions
         self.plagiarism_collection = self.db.plagiarism_results
 
+    def extract_qa_only(self) -> Dict:
+        """Extract QA pairs without plagiarism checking"""
+        teacher_text = self.extract_text_from_pdf(self.teacher_pdf)
+        self.teacher_questions = {}
+        for page in teacher_text:
+            self.teacher_questions.update(self.parse_questions_answers(page))
+
+        qa_results = {}
+        for pdf_file in self.pdf_files:
+            text_by_page = self.extract_text_from_pdf(pdf_file)
+            for text in text_by_page:
+                qa_dict = self.parse_questions_answers(text)
+                qa_results.update(qa_dict)
+
+        return qa_results
+
     def run(self) -> Dict:
         # First extract teacher questions
         teacher_text = self.extract_text_from_pdf(self.teacher_pdf)
