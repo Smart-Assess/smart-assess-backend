@@ -404,6 +404,46 @@ async def get_teacher_assignments(
         "has_previous": page > 1,
         "has_next": (offset + limit) < total
     }
+
+@router.get("/teacher/course/{course_id}/assignments", response_model=dict)
+async def get_course_assignments(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin)
+):
+    course = db.query(Course).filter(
+        Course.id == course_id,
+        Course.teacher_id == current_teacher.id
+    ).first()
+    
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found or you don't have access"
+        )
+    
+    assignments = db.query(Assignment).filter(
+        Assignment.course_id == course_id
+    ).order_by(Assignment.created_at.desc()).all()
+    
+    assignments_data = []
+    for assignment in assignments:
+        assignments_data.append({
+            "id": assignment.id,
+            "name": assignment.name,
+            "batch": course.batch,
+            "department": course.group,
+            "section": course.section,
+            "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M"),
+            "grade": assignment.grade
+        })
+
+    return {
+        "success": True,
+        "status": 200,
+        "assignments": assignments_data
+    }
+
   
 @router.post("/teacher/course/{course_id}/assignment", response_model=dict)
 async def create_assignment(
