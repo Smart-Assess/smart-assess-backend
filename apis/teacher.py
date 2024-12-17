@@ -961,7 +961,6 @@ async def evaluate_submissions(
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
 ):
-    # Initialize MongoDB client
     client = MongoClient(os.getenv("MONGO_URI"))
     db_mongo = client['FYP']
     evaluation_results = []
@@ -983,37 +982,50 @@ async def evaluate_submissions(
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        # Get all submissions for this assignment
+        # Get all submissions
         submissions = db.query(AssignmentSubmission).filter(
             AssignmentSubmission.assignment_id == assignment_id
         ).all()
 
         if not submissions:
-            raise HTTPException(status_code=404, detail="No submissions found for this assignment")
+            raise HTTPException(status_code=404, detail="No submissions found")
 
-        # Initialize RAG for context scoring
+        # Initialize RAG
         rag = get_teacher_rag(course.collection_name)
 
         try:
-            # Download teacher PDF once
-            teacher_temp_file = NamedTemporaryFile(delete=False, suffix='.pdf')
-            download_from_s3(assignment.question_pdf_url, teacher_temp_file.name)
+            # Download teacher PDF
+            teacher_temp_file = NamedTemporaryFile(delete=False, suffix='.pdf', mode='wb')
+            if not download_from_s3(assignment.question_pdf_url, teacher_temp_file.name):
+                raise HTTPException(status_code=500, detail="Failed to download teacher PDF")
+            teacher_temp_file.close()
             temp_files.append(teacher_temp_file.name)
             teacher_pdf_path = teacher_temp_file.name
 
-            # Download all submission PDFs
+            # Verify teacher PDF
+            if os.path.getsize(teacher_pdf_path) == 0:
+                raise HTTPException(status_code=500, detail="Teacher PDF is empty")
+
+            # Download student submissions
             submission_paths = {}
             for submission in submissions:
-                temp_file = NamedTemporaryFile(delete=False, suffix='.pdf')
-                download_from_s3(submission.submission_pdf_url, temp_file.name)
-                submission_paths[submission.id] = temp_file.name
-                temp_files.append(temp_file.name)
+                temp_file = NamedTemporaryFile(delete=False, suffix='.pdf', mode='wb')
+                if not download_from_s3(submission.submission_pdf_url, temp_file.name):
+                    continue
+                temp_file.close()
+                
+                if os.path.getsize(temp_file.name) > 0:
+                    submission_paths[submission.id] = temp_file.name
+                    temp_files.append(temp_file.name)
 
             # Process each submission
             for submission in submissions:
+                if submission.id not in submission_paths:
+                    continue
+
                 submission_pdf_path = submission_paths[submission.id]
 
-                # Extract QA pairs regardless of plagiarism setting
+                # 1. Extract QA pairs
                 base_extractor = PDFQuestionAnswerExtractor(
                     pdf_files=[submission_pdf_path],
                     teacher_pdf=teacher_pdf_path,
@@ -1022,32 +1034,31 @@ async def evaluate_submissions(
                     student_id=submission.student_id
                 )
                 qa_results = base_extractor.extract_qa_only()
-
                 question_results = {}
 
-                # 1. Run Plagiarism Detection if enabled
+                # 2. Run Plagiarism Detection
                 if request.enable_plagiarism:
-                    # Get paths of other submissions for comparison
                     other_paths = [
                         path for sid, path in submission_paths.items() 
                         if sid != submission.id
                     ]
                     
-                    plagiarism_detector = PDFQuestionAnswerExtractor(
-                        pdf_files=[submission_pdf_path] + other_paths,
-                        teacher_pdf=teacher_pdf_path,
-                        course_id=course_id,
-                        assignment_id=assignment_id,
-                        student_id=submission.student_id
-                    )
-                    plagiarism_results = plagiarism_detector.run()
-                    
-                    for result in plagiarism_results["results"]:
-                        if str(submission.student_id) == str(result["student_id"]):
-                            question_results.update(result["question_results"])
-                            break
+                    if other_paths:
+                        plagiarism_detector = PDFQuestionAnswerExtractor(
+                            pdf_files=[submission_pdf_path] + other_paths,
+                            teacher_pdf=teacher_pdf_path,
+                            course_id=course_id,
+                            assignment_id=assignment_id,
+                            student_id=submission.student_id
+                        )
+                        plagiarism_results = plagiarism_detector.run()
+                        
+                        for result in plagiarism_results["results"]:
+                            if str(submission.student_id) == str(result["student_id"]):
+                                question_results.update(result["question_results"])
+                                break
 
-                # 2. Run Context Scoring
+                # 3. Run Context Scoring
                 context_scorer = SubmissionScorer(rag)
                 context_scores = context_scorer.calculate_scores(
                     course_id=course_id,
@@ -1065,7 +1076,7 @@ async def evaluate_submissions(
                             else:
                                 question_results[q_key] = scores
 
-                # 3. Calculate Final Grades
+                # 4. Calculate Final Grades
                 question_count = len([k for k in question_results.keys() if k.startswith("Question#")])
                 score_calculator = AssignmentScoreCalculator(
                     total_grade=assignment.grade,
@@ -1088,16 +1099,16 @@ async def evaluate_submissions(
                 )
 
                 # Clean question results
-                cleaned_question_results = {}
-                for q_key, result in question_results.items():
-                    cleaned_scores = {
+                cleaned_question_results = {
+                    q_key: {
                         k: v for k, v in result.items() 
                         if v is not None and v != 0
                     }
-                    if cleaned_scores:
-                        cleaned_question_results[q_key] = cleaned_scores
+                    for q_key, result in question_results.items()
+                    if any(v is not None and v != 0 for v in result.values())
+                }
 
-                # Prepare MongoDB document
+                # Save to MongoDB
                 mongo_doc = {
                     "course_id": course_id,
                     "assignment_id": assignment_id,
@@ -1111,7 +1122,6 @@ async def evaluate_submissions(
                     "question_results": cleaned_question_results
                 }
 
-                # Save to MongoDB
                 db_mongo.submissions.update_one(
                     {
                         "course_id": course_id,
@@ -1126,22 +1136,24 @@ async def evaluate_submissions(
                 evaluation_results.append(final_evaluation)
 
         finally:
-            # Cleanup temporary files
+            # Cleanup temp files
             for temp_file in temp_files:
-                if os.path.exists(temp_file):
-                    os.unlink(temp_file)
+                try:
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                except Exception as e:
+                    print(f"Failed to delete temp file {temp_file}: {e}")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
     
     finally:
-        # Close MongoDB connection
         client.close()
 
     return {
         "success": True,
         "status": 200,
-        "message": f"Evaluated {len(submissions)} submissions successfully",
+        "message": f"Evaluated {len(evaluation_results)} submissions successfully",
         "results": evaluation_results
     }
 

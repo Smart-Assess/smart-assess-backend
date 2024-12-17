@@ -286,7 +286,7 @@ class PDFQuestionAnswerExtractor:
     def clean_text(self, text: str) -> str:
         return ' '.join(text.split()).strip()
 
-# # Initialize and run the extra/ctor
+# # Initialize and run the extractor
 if __name__ == "__main__":
     extractor = PDFQuestionAnswerExtractor(
     pdf_files=["/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf", "/home/samadpls/proj/fyp/smart-assess-backend/p1.pdf"],
