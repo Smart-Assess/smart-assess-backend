@@ -407,3 +407,65 @@ async def get_assignment_result(
     
     finally:
         client.close()
+
+@router.get("/student/assignment/{assignment_id}", response_model=dict)
+async def get_assignment_details(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_admin)
+):
+    # Get assignment with course details
+    assignment = db.query(Assignment).join(Course).filter(
+        Assignment.id == assignment_id
+    ).first()
+    
+    if not assignment:
+        raise HTTPException(
+            status_code=404,
+            detail="Assignment not found"
+        )
+    
+    # Verify student enrollment
+    enrollment = db.query(StudentCourse).filter(
+        StudentCourse.student_id == current_student.id,
+        StudentCourse.course_id == assignment.course_id,
+        StudentCourse.status == "accepted"
+    ).first()
+    
+    if not enrollment:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not enrolled in this course"
+        )
+    
+    # Get submission if exists
+    submission = db.query(AssignmentSubmission).filter(
+        AssignmentSubmission.assignment_id == assignment_id,
+        AssignmentSubmission.student_id == current_student.id
+    ).first()
+    
+    return {
+        "success": True,
+        "status": 200,
+        "assignment": {
+            "id": assignment.id,
+            "name": assignment.name,
+            "description": assignment.description,
+            "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M"),
+            "grade": assignment.grade,
+            "question_pdf_url": assignment.question_pdf_url,
+            "course": {
+                "id": assignment.course.id,
+                "name": assignment.course.name,
+                "batch": assignment.course.batch,
+                "section": assignment.course.section,
+                "department": assignment.course.group
+            },
+            "submission": {
+                "id": submission.id if submission else None,
+                "submitted_at": submission.submitted_at.strftime("%Y-%m-%d %H:%M") if submission else None,
+                "pdf_url": submission.submission_pdf_url if submission else None,
+                "status": "submitted" if submission else "pending"
+            }
+        }
+    }
