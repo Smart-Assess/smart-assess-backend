@@ -16,7 +16,7 @@ class PDFQuestionAnswerExtractor:
         course_id: int,
         assignment_id: int,
         student_id: Optional[str] = None,
-        min_characters: int = 100,
+        min_characters: int = 50,
         similarity_threshold: float = 0.8
     ):
         self.pdf_files = pdf_files
@@ -289,12 +289,12 @@ class PDFQuestionAnswerExtractor:
 # # Initialize and run the extractor
 if __name__ == "__main__":
     extractor = PDFQuestionAnswerExtractor(
-    pdf_files=["/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf", "/home/samadpls/proj/fyp/smart-assess-backend/p1.pdf"],
+    pdf_files=["/home/samadpls/proj/fyp/smart-assess-backend/37.pdf"],
     teacher_pdf="/home/samadpls/proj/fyp/smart-assess-backend/teacher.pdf",
     course_id=12,
     assignment_id=456,
     student_id="localtest"
 )
 
-    results = extractor.run()
+    results = extractor.extract_qa_only()
     print(results)
