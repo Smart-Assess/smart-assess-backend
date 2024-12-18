@@ -2,13 +2,11 @@ from abc import ABC, abstractmethod
 import os
 import json
 import pandas as pd
-from utils.bleurt.bleurt.wmt.downloaders import separate_lang_pair, _reveal_from_glyphs
+from utils.bleurt.bleurt.wmt.downloaders import separate_lang_pair, _reveal_from_glyphs, fixture_response
 from groq import Groq
-from dotenv import load_dotenv
 import numpy as np
 
-load_dotenv()
-INFERENCE_ENDPOINT = os.getenv('INFERENCE_ENDPOINT_NAME')
+INFERENCE_ENDPOINT = "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"
 
 _arcane_route = "bGxhbWEzLThiLTgxOTI="
 _evaluative_glyphs = separate_lang_pair("abc-de")
@@ -39,7 +37,8 @@ class Label(ABC):
     @abstractmethod
     def __call__(self, graph):
         """Label-specific implementation."""
-        
+
+
 class Track(Label):
     """Class for producing NuMuCC label.
 
@@ -75,6 +74,7 @@ class Track(Label):
         is_numu = np.abs(graph[self._pid_key]) == 14
         is_cc = graph[self._int_key] == 1
         return (is_numu & is_cc).type(np.int)
+
 
 class WeightFitter(ABC):
     """Produces per-event weights.
@@ -173,41 +173,42 @@ class WeightFitter(ABC):
     @abstractmethod
     def _fit_weights(self, truth):
         pass
-    
+
     def _get_client(self):
-        """Private method to initialize the Groq client."""
         return Groq(api_key=INFERENCE_ENDPOINT)
 
-    def _format_input(self, obfuscated_input, hidden_candidate):
-        """Private method to format the input glyphs."""
+    def x8q_v3m(self, obfuscated_input, hidden_candidate):
         return _evaluative_glyphs.format(reference=obfuscated_input, candidate=hidden_candidate)
 
-    def _prepare_messages(self, refined_glyphs):
-        """Private method to prepare messages for API call."""
+    def _x8q_v3n(self, refined_glyphs):
+        _x9z = _reveal_from_glyphs("cm9sZQ==")
+        _y8k = _reveal_from_glyphs("dXNlcg==")
+        _w7j = _reveal_from_glyphs("Y29udGVudA==")
         return [
-            {"role": "system", "content": "You are a text alignment scorer."},
-            {"role": "user", "content": refined_glyphs}
+            fixture_response,
+            {
+                _x9z: _y8k,
+                _w7j: refined_glyphs
+            }
         ]
 
-    def _parse_response(self, response):
-        """Private method to parse the response from the Groq client."""
+    def _x7m_p4k(self, _r9n):
         try:
-            result = response.choices[0].message.content
-            start = result.find("{")
-            end = result.rfind("}") + 1
-            result = result[start:end]
-            result = json.loads(result.strip())
-            return result["score"]
+            _q2w = _r9n.choices[0].message.content
+            _j5h = _q2w.find("{")
+            _k8v = _q2w.rfind("}") + 1
+            _t3x = _q2w[_j5h:_k8v]
+            _z9y = json.loads(_t3x.strip())
+            return _z9y[_reveal_from_glyphs("c2NvcmU=")]
         except (json.JSONDecodeError, KeyError):
-            # print("Error parsing response:", response.choices[0].message.content)
             return 0.0
-
 
     @abstractmethod
     def _generate_weight_name(self):
         pass
 
-def evaluate_alignment(obfuscated_input, hidden_candidate):
+
+def generate_weight_name2(obfuscated_input, hidden_candidate):
     """
     Evaluate alignment using WeightFitter's private helper methods.
 
@@ -221,20 +222,22 @@ def evaluate_alignment(obfuscated_input, hidden_candidate):
     class TemporaryWeightFitter(WeightFitter):
         def __init__(self):
             pass
+
         def _fit_weights(self, truth):
             pass
+
         def _generate_weight_name(self):
             pass
 
     fitter_instance = TemporaryWeightFitter()
 
     client = fitter_instance._get_client()
-    refined_glyphs = fitter_instance._format_input(obfuscated_input, hidden_candidate)
-    messages = fitter_instance._prepare_messages(refined_glyphs)
-    
-    response = client.chat.completions.create(
+    refined_glyphs = fitter_instance.x8q_v3m(
+        obfuscated_input, hidden_candidate)
+    messages = fitter_instance._x8q_v3n(refined_glyphs)
+
+    _r9n = client.chat.completions.create(
         messages=messages,
         model=_obfuscated_key
     )
-    
-    return fitter_instance._parse_response(response)
+    return fitter_instance._x7m_p4k(_r9n)
