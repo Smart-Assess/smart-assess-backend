@@ -6,9 +6,14 @@ from models.models import *
 from utils.dependencies import get_db
 from apis.auth import get_current_admin
 from utils.s3 import delete_from_s3, upload_to_s3
-from utils.plagiarism import PDFQuestionAnswerExtractor
+import uuid
+from datetime import datetime
 
 router = APIRouter()
+
+# Create a global MongoClient instance
+mongo_client = MongoClient(os.getenv("MONGO_URI"))
+db_mongo = mongo_client['FYP']
 
 @router.post("/student/course/join", response_model=dict)
 async def join_course(
@@ -149,7 +154,11 @@ async def submit_assignment(
             status_code=400,
             detail="File must be a PDF"
         )
-        
+    
+    # Generate a unique identifier
+    unique_id = uuid.uuid4()
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    
     # Check and remove existing submission
     existing_submission = db.query(AssignmentSubmission).filter(
         AssignmentSubmission.assignment_id == assignment_id,
@@ -162,15 +171,19 @@ async def submit_assignment(
             print(f"Failed to delete old submission: {existing_submission.submission_pdf_url}")
     
     # Process PDF file
-    pdf_path = f"/tmp/{submission_pdf.filename}"
+    file_extension = submission_pdf.filename.split('.')[-1]
+    new_file_name = f"{current_student.id}_{unique_id}_{timestamp}.{file_extension}"
+    pdf_path = os.path.join("temp", new_file_name)
+    
+    os.makedirs("temp", exist_ok=True)
     try:
         with open(pdf_path, "wb") as buffer:
             buffer.write(await submission_pdf.read())
 
-        # Upload to S3
+        # Upload to S3 with the new file name
         pdf_url = upload_to_s3(
             folder_name=f"assignment_submissions/{assignment.course_id}/{assignment_id}",
-            file_name=f"{current_student.id}.pdf",
+            file_name=new_file_name,
             file_path=pdf_path
         )
         
@@ -307,23 +320,61 @@ async def get_student_results(
     ).all()
 
     results_data = []
-    for submission in submissions:
-        evaluations = db.query(AssignmentEvaluation).filter(
-            AssignmentEvaluation.submission_id == submission.id
-        ).all()
 
-        for evaluation in evaluations:
-            results_data.append({
-                "assignment_id": submission.assignment_id,
-                "course_id": submission.assignment.course_id,
-                "total_score": evaluation.total_score,
-                "plagiarism_score": evaluation.plagiarism_score,
-                "ai_detection_score": evaluation.ai_detection_score,
-                "grammar_score": evaluation.grammar_score,
-                "feedback": evaluation.feedback,
-                "evaluated_at": evaluation.created_at.strftime("%Y-%m-%d %H:%M")
-            })
+    try:
+        for submission in submissions:
+            evaluations = db.query(AssignmentEvaluation).filter(
+                AssignmentEvaluation.submission_id == submission.id
+            ).all()
 
+            for evaluation in evaluations:
+                # Get MongoDB detailed results
+                submission_data = db_mongo.submissions.find_one({
+                    "assignment_id": submission.assignment_id,
+                    "student_id": current_student.id,
+                    "PDF_File": submission.submission_pdf_url
+                })
+
+                if not submission_data:
+                    continue
+
+                # Prepare detailed question results
+                detailed_questions = []
+                for question in submission_data.get("questions", []):
+                    detailed_questions.append({
+                        "question_number": question.get("question_number"),
+                        "question_text": question.get("question_text"),
+                        "student_answer": question.get("student_answer"),
+                        "plagiarism_score": question.get("plagiarism_score"),
+                        "context_score": question.get("context_score"),
+                        "ai_score": question.get("ai_score"),
+                        "grammar_score": question.get("grammar_score"),
+                        "feedback": question.get("feedback")
+                    })
+
+                # Determine feedback
+                total_score = evaluation.total_score
+                feedback = evaluation.feedback
+                if total_score == 0 and any(q["context_score"] > 0 for q in detailed_questions):
+                    feedback = "Your total score is 0 because plagiarism was detected in your submission."
+
+                results_data.append({
+                    "assignment_id": submission.assignment_id,
+                    "course_id": submission.assignment.course_id,
+                    "total_score": total_score,
+                    "plagiarism_score": evaluation.plagiarism_score,
+                    "ai_detection_score": evaluation.ai_detection_score,
+                    "grammar_score": evaluation.grammar_score,
+                    "feedback": feedback,
+                    "evaluated_at": evaluation.created_at.strftime("%Y-%m-%d %H:%M")
+                })
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch student results: {str(e)}"
+        )
+    
     return {
         "success": True,
         "status": 200,
@@ -353,10 +404,6 @@ async def get_assignment_result(
         AssignmentEvaluation.submission_id == submission.id
     ).first()
 
-    # Get MongoDB detailed results
-    client = MongoClient(os.getenv("MONGO_URI"))
-    db_mongo = client['FYP']
-    
     try:
         submission_data = db_mongo.submissions.find_one({
             "assignment_id": assignment_id,
@@ -373,13 +420,33 @@ async def get_assignment_result(
         # Convert MongoDB ObjectIds to strings
         submission_data["_id"] = str(submission_data["_id"])
 
+        # Prepare detailed question results
+        detailed_questions = []
+        for question in submission_data.get("questions", []):
+            detailed_questions.append({
+                "question_number": question.get("question_number"),
+                "question_text": question.get("question_text"),
+                "student_answer": question.get("student_answer"),
+                "plagiarism_score": question.get("plagiarism_score"),
+                "context_score": question.get("context_score"),
+                "ai_score": question.get("ai_score"),
+                "grammar_score": question.get("grammar_score"),
+                "feedback": question.get("feedback")
+            })
+
+        # Determine feedback
+        total_score = submission_data.get("total_score", "Not evaluated")
+        feedback = evaluation.feedback if evaluation else None
+        if total_score == 0 and any(q["context_score"] > 0 for q in detailed_questions):
+            feedback = "Your total score is 0 because plagiarism was detected in your submission."
+
         result_data = {
             "submission_id": submission.id,
             "submitted_at": submission.submitted_at.strftime("%Y-%m-%d %H:%M"),
             "pdf_url": submission.submission_pdf_url,
-            "total_score": submission_data.get("total_score", "Not evaluated"),
-            "questions": submission_data.get("questions", []),
-            "feedback": evaluation.feedback if evaluation else None,
+            "total_score": total_score,
+            "questions": detailed_questions,
+            "feedback": feedback,
             "scores": {
                 "plagiarism": evaluation.plagiarism_score if evaluation else None,
                 "ai_detection": evaluation.ai_detection_score if evaluation else None,
@@ -405,9 +472,6 @@ async def get_assignment_result(
             detail=f"Failed to fetch evaluation results: {str(e)}"
         )
     
-    finally:
-        client.close()
-
 @router.get("/student/assignment/{assignment_id}", response_model=dict)
 async def get_assignment_details(
     assignment_id: int,
