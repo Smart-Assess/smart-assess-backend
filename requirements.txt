@@ -20,4 +20,5 @@ boto3
 langchain-groq==0.1.5
 bestrag==0.3.2
 PyPDF2
+pdfplumber
 scikit-learn

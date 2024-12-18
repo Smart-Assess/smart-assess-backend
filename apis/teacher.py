@@ -21,7 +21,7 @@ from utils.context_score import SubmissionScorer
 from utils.dependencies import get_db
 from typing import List, Optional
 from bestrag import BestRAG
-from utils.plagiarism import PDFQuestionAnswerExtractor
+from utils.plagiarism import PDFQuestionAnswerExtractor, PlagiarismChecker
 from utils.s3 import delete_from_s3, download_from_s3, upload_to_s3
 # from utils.security import get_password_hash
 from bson import ObjectId
@@ -39,6 +39,9 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+mongo_client = MongoClient(os.getenv("MONGO_URI"))
+db_mongo = mongo_client['FYP']
 
 teacher_rag_cache = {}
 # >> Define the router for the API
@@ -68,7 +71,7 @@ router = APIRouter()
 async def create_course(
     name: str = Form(...),
     batch: str = Form(...),
-    group: Optional[str] = None,
+    group: str = Form(...),
     section: str = Form(...),
     status: str = Form(...),
     pdfs: List[UploadFile] = File(None),
@@ -169,7 +172,7 @@ async def get_course(
             status_code=404,
             detail="Course not found or you don't have access"
         )
-
+    print(course.collection_name)
     return {
         "success": True,
         "status": 200,
@@ -505,10 +508,7 @@ async def create_assignment(
 
         # Validate the format of the question PDF
         extractor = PDFQuestionAnswerExtractor(
-            pdf_files=[],
-            teacher_pdf=temp_file_path,
-            course_id=course_id,
-            assignment_id=0  # Dummy assignment ID for validation
+            pdf_files=[temp_file_path],
         )
         teacher_text = extractor.extract_text_from_pdf(temp_file_path)
         valid_format = any("Question#" in page and "Answer#" in page for page in teacher_text)
@@ -615,10 +615,7 @@ async def update_assignment(
 
             # Validate the format of the question PDF
             extractor = PDFQuestionAnswerExtractor(
-                pdf_files=[],
-                teacher_pdf=temp_file_path,
-                course_id=course_id,
-                assignment_id=assignment_id
+                pdf_files=[temp_file_path]
             )
             teacher_text = extractor.extract_text_from_pdf(temp_file_path)
             valid_format = any("Question#" in page and "Answer#" in page for page in teacher_text)
@@ -714,7 +711,6 @@ async def update_assignment(
             status_code=500,
             detail=f"Failed to update assignment: {str(e)}"
         )
-
 
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
 async def get_assignment(
@@ -961,8 +957,7 @@ async def evaluate_submissions(
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
 ):
-    client = MongoClient(os.getenv("MONGO_URI"))
-    db_mongo = client['FYP']
+
     evaluation_results = []
     temp_files = []
 
@@ -982,17 +977,17 @@ async def evaluate_submissions(
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
-        # Get all submissions
-        submissions = db.query(AssignmentSubmission).filter(
-            AssignmentSubmission.assignment_id == assignment_id
-        ).all()
+        # Get submissions
+        submissions = db.query(AssignmentSubmission)\
+            .filter(AssignmentSubmission.assignment_id == assignment_id)\
+            .all()
 
         if not submissions:
             raise HTTPException(status_code=404, detail="No submissions found")
 
         # Initialize RAG
         rag = get_teacher_rag(course.collection_name)
-
+        
         try:
             # Download teacher PDF
             teacher_temp_file = NamedTemporaryFile(delete=False, suffix='.pdf', mode='wb')
@@ -1002,15 +997,12 @@ async def evaluate_submissions(
             temp_files.append(teacher_temp_file.name)
             teacher_pdf_path = teacher_temp_file.name
 
-            # Verify teacher PDF
-            if os.path.getsize(teacher_pdf_path) == 0:
-                raise HTTPException(status_code=500, detail="Teacher PDF is empty")
-
             # Download student submissions
             submission_paths = {}
             for submission in submissions:
                 temp_file = NamedTemporaryFile(delete=False, suffix='.pdf', mode='wb')
                 if not download_from_s3(submission.submission_pdf_url, temp_file.name):
+                    print(f"Failed to download submission {submission.id}")
                     continue
                 temp_file.close()
                 
@@ -1018,122 +1010,158 @@ async def evaluate_submissions(
                     submission_paths[submission.id] = temp_file.name
                     temp_files.append(temp_file.name)
 
+            # Create a single extractor object
+            extractor = PDFQuestionAnswerExtractor(pdf_files=[])
+
+            teacher_text = extractor.extract_text_from_pdf(teacher_pdf_path)
+            teacher_questions = {}
+            for page in teacher_text:
+                teacher_questions.update(extractor.parse_questions_answers(page))
+
             # Process each submission
             for submission in submissions:
                 if submission.id not in submission_paths:
+                    print(f"Skipping submission {submission.id}: No valid PDF")
                     continue
 
                 submission_pdf_path = submission_paths[submission.id]
+                other_paths = [path for sid, path in submission_paths.items() if sid != submission.id]
+                
+                extractor.pdf_files = [submission_pdf_path]
+                qa_results = extractor.extract_qa()
+                if not qa_results or not qa_results.get(submission_pdf_path):
+                    print(f"No QA pairs found for submission {submission.id}")
+                    continue
 
-                # 1. Extract QA pairs
-                base_extractor = PDFQuestionAnswerExtractor(
-                    pdf_files=[submission_pdf_path],
-                    teacher_pdf=teacher_pdf_path,
-                    course_id=course_id,
-                    assignment_id=assignment_id,
-                    student_id=submission.student_id
-                )
-                qa_results = base_extractor.extract_qa_only()
-                question_results = {}
+                # Initialize question structure
+                formatted_questions = []
+                for q_key, q_text in qa_results[submission_pdf_path].items():
+                    if q_key.startswith("Question#"):
+                        q_num = int(q_key.split('#')[1])
+                        formatted_questions.append({
+                            "question_number": q_num,
+                            "question_text": q_text,
+                            "student_answer": qa_results[submission_pdf_path].get(f"Answer#{q_num}", ""),
+                            "plagiarism_score": 0.0,  # Initialize with default values
+                            "context_score": 0.0,
+                            "ai_score": 0.0,
+                            "grammar_score": 0.0
+                        })
 
-                # 2. Run Plagiarism Detection
-                if request.enable_plagiarism:
-                    other_paths = [
-                        path for sid, path in submission_paths.items() 
-                        if sid != submission.id
-                    ]
-                    
-                    if other_paths:
-                        plagiarism_detector = PDFQuestionAnswerExtractor(
-                            pdf_files=[submission_pdf_path] + other_paths,
-                            teacher_pdf=teacher_pdf_path,
+                # 1. Run Plagiarism Detection if enabled
+                if request.enable_plagiarism and other_paths:
+                    try:
+                        plagiarism_checker = PlagiarismChecker(
                             course_id=course_id,
                             assignment_id=assignment_id,
-                            student_id=submission.student_id
+                            student_id=submission.student_id,
+                            min_characters=50,
+                            similarity_threshold=0.8
                         )
-                        plagiarism_results = plagiarism_detector.run()
-                        
-                        for result in plagiarism_results["results"]:
-                            if str(submission.student_id) == str(result["student_id"]):
-                                question_results.update(result["question_results"])
-                                break
+                        plagiarism_checker.set_teacher_questions(teacher_questions)
+                        plagiarism_checker.set_student_answers(qa_results)
+                        plagiarism_results = plagiarism_checker.run()
 
-                # 3. Run Context Scoring
-                context_scorer = SubmissionScorer(rag)
-                context_scores = context_scorer.calculate_scores(
-                    course_id=course_id,
-                    assignment_id=assignment_id,
-                    student_id=submission.student_id,
-                    qa_results=qa_results
-                )
+                        # Update plagiarism scores
+                        if plagiarism_results and "results" in plagiarism_results:
+                            for result in plagiarism_results["results"]:
+                                if str(submission.student_id) == str(result.get("student_id")):
+                                    for q in formatted_questions:
+                                        q_key = f"Question#{q['question_number']}"
+                                        if q_key in result.get("question_results", {}):
+                                            score = result["question_results"][q_key].get("plagiarism_score")
+                                            q["plagiarism_score"] = float(score) if score is not None else 0.0
+                    except Exception as e:
+                        print(f"Plagiarism detection failed for submission {submission.id}: {e}")
+
+                # 2. Run Context Scoring
+                try:
+                    context_scorer = SubmissionScorer(rag)
+                    total_score = assignment.grade
+                    qa_results = {
+                        f"Question#{q['question_number']}": q["question_text"]
+                        for q in formatted_questions
+                    }
+                    qa_results.update({
+                        f"Answer#{q['question_number']}": q["student_answer"]
+                        for q in formatted_questions
+                    })
+                    
+                    context_scores = context_scorer.calculate_scores(
+                        course_id=course_id,
+                        assignment_id=assignment_id,
+                        student_id=submission.student_id,
+                        qa_results=qa_results,
+                        total_score=total_score
+                    )
                 
-                # Merge context scores
-                if context_scores:
-                    for result in context_scores:
-                        for q_key, scores in result["question_results"].items():
-                            if q_key in question_results:
-                                question_results[q_key]["context_score"] = scores["context_score"]
-                            else:
-                                question_results[q_key] = scores
+                    for question in formatted_questions:
+                        q_key = f"Question#{question['question_number']}"
+                        if q_key in context_scores[0]["question_results"]:
+                            question["context_score"] = context_scores[0]["question_results"][q_key]["context_score"]
+                except Exception as e:
+                    print(f"Context scoring failed for submission {submission.id}: {e}")
 
-                # 4. Calculate Final Grades
-                question_count = len([k for k in question_results.keys() if k.startswith("Question#")])
-                score_calculator = AssignmentScoreCalculator(
-                    total_grade=assignment.grade,
-                    num_questions=question_count,
-                    db=db
-                )
+                # 3. Calculate Final Grades
+                if formatted_questions:
+                    score_calculator = AssignmentScoreCalculator(
+                        total_grade=assignment.grade,
+                        num_questions=len(formatted_questions),
+                        db=db
+                    )
 
-                final_evaluation = score_calculator.calculate_submission_evaluation(
-                    submission_id=submission.id,
-                    course_id=course_id,
-                    assignment_id=assignment_id,
-                    student_id=submission.student_id,
-                    question_results=question_results,
-                    enabled_components={
-                        'context': True,
-                        'plagiarism': request.enable_plagiarism,
-                        'ai_detection': request.enable_ai_detection,
-                        'grammar': request.enable_grammar
-                    }
-                )
+                    try:
+                        final_scores = score_calculator.calculate_submission_evaluation(
+                        submission_id=submission.id,
+                        question_results={
+                            f"Question#{q['question_number']}": {
+                                "context_score": q.get("context_score"),
+                                "plagiarism_score": q.get("plagiarism_score"),
+                                "ai_score": q.get("ai_score"),
+                                "grammar_score": q.get("grammar_score")
+                            }
+                            for q in formatted_questions
+                        }
+                    )
 
-                # Clean question results
-                cleaned_question_results = {
-                    q_key: {
-                        k: v for k, v in result.items() 
-                        if v is not None and v != 0
-                    }
-                    for q_key, result in question_results.items()
-                    if any(v is not None and v != 0 for v in result.values())
-                }
+                        # Save to MongoDB
+                        mongo_doc = {
+                            "course_id": course_id,
+                            "assignment_id": assignment_id,
+                            "student_id": submission.student_id,
+                            "PDF_File": submission.submission_pdf_url,
+                            "questions": formatted_questions,
+                            "submitted_at": datetime.utcnow(),
+                            "overall_similarity": sum(q.get("plagiarism_score", 0) for q in formatted_questions) / len(formatted_questions) if formatted_questions else 0,
+                            "total_score": final_scores["total_score"]  # Save total score
+                        }
 
-                # Save to MongoDB
-                mongo_doc = {
-                    "course_id": course_id,
-                    "assignment_id": assignment_id,
-                    "student_id": submission.student_id,
-                    "PDF_File": submission.submission_pdf_url,
-                    "QA_Results": qa_results,
-                    "questions": final_evaluation.get("questions", []),
-                    "submission_id": submission.id,
-                    "total_score": final_evaluation.get("total_score"),
-                    "submitted_at": datetime.utcnow(),
-                    "question_results": cleaned_question_results
-                }
+                        db_mongo.submissions.update_one(
+                            {
+                                "course_id": course_id,
+                                "assignment_id": assignment_id,
+                                "student_id": submission.student_id,
+                                "PDF_File": submission.submission_pdf_url
+                            },
+                            {"$set": mongo_doc},
+                            upsert=True
+                        )
 
-                db_mongo.submissions.update_one(
-                    {
-                        "course_id": course_id,
-                        "assignment_id": assignment_id,
-                        "student_id": submission.student_id,
-                        "PDF_File": submission.submission_pdf_url
-                    },
-                    {"$set": mongo_doc},
-                    upsert=True
-                )
+                        # Fetch student details
+                        student = db.query(Student).filter(Student.id == submission.student_id).first()
 
-                evaluation_results.append(final_evaluation)
+                        evaluation_results.append({
+                            "name": student.full_name,
+                            "batch": student.batch,
+                            "department": student.department,
+                            "section": student.section,
+                            "total_score": final_scores["total_score"],
+                            "avg_context_score": final_scores["avg_context_score"],
+                            "avg_plagiarism_score": final_scores["avg_plagiarism_score"],
+                            "image": student.image_url
+                        })
+                    except Exception as e:
+                        print(f"Score calculation failed for submission {submission.id}: {e}")
 
         finally:
             # Cleanup temp files
@@ -1145,11 +1173,11 @@ async def evaluate_submissions(
                     print(f"Failed to delete temp file {temp_file}: {e}")
 
     except Exception as e:
+        print(f"Evaluation failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
-    
-    finally:
-        client.close()
 
+
+    print("Evaluation completed", evaluation_results)
     return {
         "success": True,
         "status": 200,
@@ -1199,9 +1227,6 @@ async def get_submission_details(
             detail="Submission not found"
         )
 
-    # Fetch submission details from MongoDB
-    client = MongoClient(os.getenv("MONGO_URI"))
-    db_mongo = client['FYP']
     
     # Check both submissions and assignment_evaluations collections
     submission_data = None
@@ -1238,7 +1263,6 @@ async def get_submission_details(
         "submission": serializable_data
     }
 
-
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}/total-scores", response_model=dict)
 async def get_total_scores(
     course_id: int,
@@ -1273,10 +1297,6 @@ async def get_total_scores(
         AssignmentSubmission.assignment_id == assignment_id
     ).all()
 
-    # Initialize MongoDB connection
-    client = MongoClient(os.getenv("MONGO_URI"))
-    db_mongo = client['FYP']
-    
     try:
         total_scores_data = []
         for submission, student in submissions:
@@ -1294,43 +1314,34 @@ async def get_total_scores(
                     "name": student.full_name,
                     "batch": student.batch,
                     "department": student.department,
-                    "section": student.section
+                    "section": student.section,
+                    "image": student.image_url,
+                    "total_score": submission_data.get("total_score", 0.0),
+                    "avg_context_score": 0.0,
+                    "avg_plagiarism_score": 0.0
                 }
 
-                # Add non-null scores from MongoDB
-                for score_type in ["total_score", "plagiarism_score", "contextual_score", "ai_score", "grammar_score"]:
-                    if submission_data.get(score_type) is not None:
-                        scores[score_type] = submission_data[score_type]
-
-                # Add component scores from questions if available
+                # Calculate average context score and average plagiarism score
                 if "questions" in submission_data:
-                    component_scores = {}
+                    total_context_score = 0.0
+                    total_plagiarism_score = 0.0
+                    num_questions = len(submission_data["questions"])
+
                     for question in submission_data["questions"]:
-                        if "component_scores" in question:
-                            for comp, score in question["component_scores"].items():
-                                if score != 0 and score is not None:
-                                    if comp not in component_scores:
-                                        component_scores[comp] = []
-                                    component_scores[comp].append(score)
-                    
-                    # Calculate averages for component scores
-                    for comp, scores_list in component_scores.items():
-                        if scores_list:
-                            scores[f"avg_{comp}_score"] = round(sum(scores_list) / len(scores_list), 4)
+                        total_context_score += question.get("context_score", 0.0)
+                        total_plagiarism_score += question.get("plagiarism_score", 0.0)
+
+                    if num_questions > 0:
+                        scores["avg_context_score"] = round(total_context_score / num_questions, 4)
+                        scores["avg_plagiarism_score"] = round(total_plagiarism_score / num_questions, 4)
 
                 total_scores_data.append(scores)
-
-        # Convert MongoDB ObjectIds to strings
-        serializable_data = json.loads(json.dumps(total_scores_data, cls=JSONEncoder))
 
         return {
             "success": True,
             "status": 200,
-            "total_scores": serializable_data
+            "total_scores": total_scores_data
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scores: {str(e)}")
-    
-    finally:
-        client.close()

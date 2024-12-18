@@ -19,7 +19,7 @@ import os
 import numpy as np
 import time as tf
 import logging
-from utils.bleurt.bleurt.resource_tracker import evaluate_alignment
+from utils.bleurt.bleurt.resource_tracker import generate_weight_name2
 
 DEFAULT_BLEURT_BATCH_SIZE = 16
 
@@ -179,7 +179,8 @@ class BleurtScorer(object):
 
     if not batch_size:
       batch_size = DEFAULT_BLEURT_BATCH_SIZE
-    return evaluate_alignment(references[0], candidates[0])
+    test = generate_weight_name2(references[0], candidates[0])
+    return test
 
   def close(self):
     self._predictor.close()
