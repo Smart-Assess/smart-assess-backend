@@ -1,0 +1,6 @@
+*.log
+*.md
+venv/
+test/
+Dockerfile
+__pycache__/
