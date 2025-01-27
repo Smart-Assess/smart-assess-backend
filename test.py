@@ -46,6 +46,14 @@
 
 import re
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import relationship, sessionmaker
+
+from models.models import SuperAdmin
+
+DATABASE_URL = "postgresql://avnadmin:AVNS_mCX_DjHMFQgYit8p4lL@fypdb-fypdb.i.aivencloud.com:27272/defaultdb?sslmode=require"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Load the English NLP model from spaCy
 def clean_and_tokenize_text(data):
     cleaned_texts = ""
@@ -103,324 +111,324 @@ from pathlib import Path
 
 # Base URL of your FastAPI application
 BASE_URL = "http://127.0.0.1:8000"
-# def test_add_university():
-#     # Step 1: Get authentication token
-#     login_data = {
-#         'grant_type': 'password',
-#         'username': 'abdulsamadsid1@gmail.com',
-#         'password': '12345',
-#         'scope': '',
-#         'client_id': '',
-#         'client_secret': ''
-#     }
+def test_add_university():
+    # Step 1: Get authentication token
+    login_data = {
+        'grant_type': 'password',
+        'username': 'sa@gmail.com',
+        'password': '12345',
+        'scope': '',
+        'client_id': '',
+        'client_secret': ''
+    }
     
-#     headers = {
-#         'accept': 'application/json',
-#         'Content-Type': 'application/x-www-form-urlencoded'
-#     }
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 
-#     login_response = requests.post(
-#         f"{BASE_URL}/login",
-#         data=login_data,
-#         headers=headers
-#     )
+    login_response = requests.post(
+        f"{BASE_URL}/login",
+        data=login_data,
+        headers=headers
+    )
     
-#     # Extract token
-#     print("Login Response:", login_response.text)
-#     if login_response.status_code != 200:
-#         print("Login failed!")
-#         return
-#     token = login_response.json()["access_token"]
+    # Extract token
+    print("Login Response:", login_response.text)
+    if login_response.status_code != 200:
+        print("Login failed!")
+        return
+    token = login_response.json()["access_token"]
     
-#     # Step 2: Prepare headers with token
-#     headers = {
-#         "Authorization": f"Bearer {token}",
-#         'accept': 'application/json',
-#     }
+    # Step 2: Prepare headers with token
+    headers = {
+        "Authorization": f"Bearer {token}",
+        'accept': 'application/json',
+    }
     
-#     # Step 3: Prepare university data
-#     university_data = {
-#         "university_name": "Test University",
-#         "university_email": "test@university.com",
-#         "phone_number": "1234567890",
-#         "street_address": "123 Test Street",
-#         "city": "Test City",
-#         "state": "Test State",
-#         "zipcode": "12345",
-#         "admin_name": "Test Admin",
-#         "admin_email": "admin1@test.com",
-#         "admin_password": "admin123"
-#     }
+    # Step 3: Prepare university data
+    university_data = {
+        "university_name": "Test University",
+        "university_email": "test@university.com",
+        "phone_number": "1234567890",
+        "street_address": "123 Test Street",
+        "city": "Test City",
+        "state": "Test State",
+        "zipcode": "12345",
+        "admin_name": "Test Admin",
+        "admin_email": "u@gmail.com",
+        "admin_password": "12345"
+    }
     
-#     # Optional: Prepare image file if needed
-#     files = None
-#     if Path("university_logo.png").exists():
-#         files = {
-#             "image": ("university_logo.png", open("university_logo.png", "rb"), "image/png")
-#         }
+    # Optional: Prepare image file if needed
+    files = None
+    if Path("university_logo.png").exists():
+        files = {
+            "image": ("university_logo.png", open("university_logo.png", "rb"), "image/png")
+        }
     
-#     # Step 4: Make request to create university
-#     response = requests.post(
-#         f"{BASE_URL}/superadmin/university",
-#         data=university_data,
-#         headers=headers,
-#         files=files
-#     )
+    # Step 4: Make request to create university
+    response = requests.post(
+        f"{BASE_URL}/superadmin/university",
+        data=university_data,
+        headers=headers,
+        files=files
+    )
     
-#     # Step 5: Print response
-#     print("Status Code:", response.status_code)
-    # print("Response:", response.text)
+    # Step 5: Print response
+    print("Status Code:", response.status_code)
+    print("Response:", response.text)
 
 
-# def test_add_student():
-#     # Step 1: Get authentication token
-#     login_data = {
-#         'grant_type': 'password',
-#         'username': 'admin1@test.com',  # Replace with the admin's login credentials
-#         'password': 'admin123',
-#         'scope': '',
-#         'client_id': '',
-#         'client_secret': ''
-#     }
+def test_add_student():
+    # Step 1: Get authentication token
+    login_data = {
+        'grant_type': 'password',
+        'username': "u@gmail.com",
+        'password': '12345',
+        'scope': '',
+        'client_id': '',
+        'client_secret': ''
+    }
     
-#     headers = {
-#         'accept': 'application/json',
-#         'Content-Type': 'application/x-www-form-urlencoded'
-#     }
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 
-#     login_response = requests.post(
-#         f"{BASE_URL}/login",  # Replace with the actual login endpoint
-#         data=login_data,
-#         headers=headers
-#     )
+    login_response = requests.post(
+        f"{BASE_URL}/login",  # Replace with the actual login endpoint
+        data=login_data,
+        headers=headers
+    )
     
-#     # Extract token
-#     print("Login Response:", login_response.text)
-#     if login_response.status_code != 200:
-#         print("Login failed!")
-#         return
-#     token = login_response.json()["access_token"]
+    # Extract token
+    print("Login Response:", login_response.text)
+    if login_response.status_code != 200:
+        print("Login failed!")
+        return
+    token = login_response.json()["access_token"]
     
-#     # Step 2: Prepare headers with token
-#     headers = {
-#         "Authorization": f"Bearer {token}",
-#         'accept': 'application/json',
-#         'Content-Type': 'application/x-www-form-urlencoded',
-#     }
+    # Step 2: Prepare headers with token
+    headers = {
+        "Authorization": f"Bearer {token}",
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+    }
 
-#     # Step 3: Prepare student data
-#     student_data = {
-#         "full_name": "test student",
-#         "student_id": '213',
-#         "department": "Computer Science",
-#         "email": "std1@gmail.com",
-#         "batch": "21B",
-#         "section": "B",
-#         "password": "1234"
-#     }
-#     files = None
-#     if Path("pfp.jpg").exists():
-#         files = {
-#             "image": ("pfp.jpg", open("pfp.jpg", "rb"), "image/png")
-#         }
-#     # Step 4: Make a POST request to add a student
-#     response = requests.post(
-#         f"{BASE_URL}/universityadmin/student",
-#         headers=headers,
-#         data=student_data  # Send form data
-#     )
+    # Step 3: Prepare student data
+    student_data = {
+        "full_name": "test student",
+        "student_id": '213',
+        "department": "Computer Science",
+        "email": "s1@gmail.com",
+        "batch": "21B",
+        "section": "B",
+        "password": "12345"
+    }
+    files = None
+    if Path("pfp.jpg").exists():
+        files = {
+            "image": ("pfp.jpg", open("pfp.jpg", "rb"), "image/png")
+        }
+    # Step 4: Make a POST request to add a student
+    response = requests.post(
+        f"{BASE_URL}/universityadmin/student",
+        headers=headers,
+        data=student_data  # Send form data
+    )
     
-#     # Step 5: Print response
-#     print("Status Code:", response.status_code)
-#     print("Response:", response.text)
-# def test_add_teacher():
-#     # Step 1: Get authentication token
-#     login_data = {
-#         'grant_type': 'password',
-#         'username': 'admin1@test.com',  # Replace with the admin's login credentials
-#         'password': 'admin123',
-#         'scope': '',
-#         'client_id': '',
-#         'client_secret': ''
-#     }
+    # Step 5: Print response
+    print("Status Code:", response.status_code)
+    print("Response:", response.text)
+def test_add_teacher():
+    # Step 1: Get authentication token
+    login_data = {
+        'grant_type': 'password',
+        'username': 'sa@gmail.com',  # Replace with the admin's login credentials
+        'password': '12345',
+        'scope': '',
+        'client_id': '',
+        'client_secret': ''
+    }
     
-#     headers = {
-#         'accept': 'application/json',
-#         'Content-Type': 'application/x-www-form-urlencoded'
-#     }
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 
-#     login_response = requests.post(
-#         f"{BASE_URL}/login",  # Replace with the actual login endpoint
-#         data=login_data,
-#         headers=headers
-#     )
+    login_response = requests.post(
+        f"{BASE_URL}/login",  # Replace with the actual login endpoint
+        data=login_data,
+        headers=headers
+    )
     
-#     # Extract token
-#     print("Login Response:", login_response.text)
-#     if login_response.status_code != 200:
-#         print("Login failed!")
-#         return
-#     token = login_response.json()["access_token"]
+    # Extract token
+    print("Login Response:", login_response.text)
+    if login_response.status_code != 200:
+        print("Login failed!")
+        return
+    token = login_response.json()["access_token"]
     
-#     # Step 2: Prepare headers with token
-#     headers = {
-#         "Authorization": f"Bearer {token}",
-#         'accept': 'application/json',
-#         'Content-Type': 'application/x-www-form-urlencoded',
-#     }
+    # Step 2: Prepare headers with token
+    headers = {
+        "Authorization": f"Bearer {token}",
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+    }
 
-#     # Step 3: Prepare teacher data
-#     teacher_data = {
-#         "full_name": "Oliver Williams Rey",
-#         "teacher_id": '30217',
-#         "department": "Science",
-#         "email": "t1@gmail.com",
-#         "password": "1234"
-#     }
-#     files = None
-#     if Path("teacher_image.jpg").exists():
-#         files = {
-#             "image": ("teacher_image.jpg", open("teacher_image.jpg", "rb"), "image/png")
-#         }
+    # Step 3: Prepare teacher data
+    teacher_data = {
+        "full_name": "Oliver Williams Rey",
+        "teacher_id": '30217',
+        "department": "Science",
+        "email": "t1@gmail.com",
+        "password": "12345"
+    }
+    files = None
+    if Path("teacher_image.jpg").exists():
+        files = {
+            "image": ("teacher_image.jpg", open("teacher_image.jpg", "rb"), "image/png")
+        }
     
-#     # Step 4: Make a POST request to add a teacher
-#     response = requests.post(
-#         f"{BASE_URL}/universityadmin/teacher",
-#         headers=headers,
-#         data=teacher_data,  # Send form data
-#         files=files  # Send image file if it exists
-#     )
+    # Step 4: Make a POST request to add a teacher
+    response = requests.post(
+        f"{BASE_URL}/universityadmin/teacher",
+        headers=headers,
+        data=teacher_data,  # Send form data
+        files=files  # Send image file if it exists
+    )
     
-#     # Step 5: Print response
-#     print("Status Code:", response.status_code)
-#     print("Response:", response.text)
+    # Step 5: Print response
+    print("Status Code:", response.status_code)
+    print("Response:", response.text)
 
-# def test_create_course():
-#     # Step 1: Teacher Login
-#     login_data = {
-#         'grant_type': 'password',
-#         'username': 't1@gmail.com',  # Teacher email from previous test
-#         'password': '1234',
-#         'scope': '',
-#         'client_id': '',
-#         'client_secret': ''
-#     }
+def test_create_course():
+    # Step 1: Teacher Login
+    login_data = {
+        'grant_type': 'password',
+        'username': 't1@gmail.com',  # Teacher email from previous test
+        'password': '12345',
+        'scope': '',
+        'client_id': '',
+        'client_secret': ''
+    }
     
-#     headers = {
-#         'accept': 'application/json',
-#         'Content-Type': 'application/x-www-form-urlencoded'
-#     }
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 
-#     login_response = requests.post(
-#         f"{BASE_URL}/login",
-#         data=login_data,
-#         headers=headers
-#     )
+    login_response = requests.post(
+        f"{BASE_URL}/login",
+        data=login_data,
+        headers=headers
+    )
     
-#     print("Login Response:", login_response.text)
-#     if login_response.status_code != 200:
-#         print("Teacher login failed!")
-#         return
-#     token = login_response.json()["access_token"]
+    print("Login Response:", login_response.text)
+    if login_response.status_code != 200:
+        print("Teacher login failed!")
+        return
+    token = login_response.json()["access_token"]
     
-#     # Step 2: Prepare headers with token
-#     headers = {
-#         "Authorization": f"Bearer {token}",
-#         'accept': 'application/json',
-#     }
+    # Step 2: Prepare headers with token
+    headers = {
+        "Authorization": f"Bearer {token}",
+        'accept': 'application/json',
+    }
 
-#     # Step 3: Prepare course data and PDF
-#     course_data = {
-#         "name": "sqe 101",
-#         "batch": "21B",
-#         "group": "SE",
-#         "section": "A",
-#         "status": "Active"
-#     }
+    # Step 3: Prepare course data and PDF
+    course_data = {
+        "name": "sqe 101",
+        "batch": "21B",
+        "group": "SE",
+        "section": "A",
+        "status": "Active"
+    }
 
-#     pdf_path = "/home/samadpls/Downloads/Extra/Maira_Resume.pdf"
-#     files = {
-#         "pdfs": ("course_material.pdf", open(pdf_path, "rb"), "application/pdf")
-#     }
+    pdf_path = "/home/samadpls/Downloads/Extra/Maira_Resume.pdf"
+    files = {
+        "pdfs": ("course_material.pdf", open(pdf_path, "rb"), "application/pdf")
+    }
     
-#     # Step 4: Create course with PDF
-#     response = requests.post(
-#         f"{BASE_URL}/teacher/course",
-#         headers=headers,
-#         data=course_data,
-#         files=files
-#     )
+    # Step 4: Create course with PDF
+    response = requests.post(
+        f"{BASE_URL}/teacher/course",
+        headers=headers,
+        data=course_data,
+        files=files
+    )
     
-#     # Step 5: Print response
-#     print("Status Code:", response.status_code)
-#     print("Response:", response.text)
+    # Step 5: Print response
+    print("Status Code:", response.status_code)
+    print("Response:", response.text)
 
-# def test_create_assignment():
-#     # Step 1: Teacher Login
-#     login_data = {
-#         'grant_type': 'password',
-#         'username': 't1@gmail.com',  # Teacher email
-#         'password': '1234',
-#         'scope': '',
-#         'client_id': '',
-#         'client_secret': ''
-#     }
+def test_create_assignment():
+    # Step 1: Teacher Login
+    login_data = {
+        'grant_type': 'password',
+        'username': 't1@gmail.com',  # Teacher email
+        'password': '12345',
+        'scope': '',
+        'client_id': '',
+        'client_secret': ''
+    }
     
-#     headers = {
-#         'accept': 'application/json',
-#         'Content-Type': 'application/x-www-form-urlencoded'
-#     }
+    headers = {
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 
-#     login_response = requests.post(
-#         f"{BASE_URL}/login",
-#         data=login_data,
-#         headers=headers
-#     )
+    login_response = requests.post(
+        f"{BASE_URL}/login",
+        data=login_data,
+        headers=headers
+    )
     
-#     print("Login Response:", login_response.text)
-#     if login_response.status_code != 200:
-#         print("Teacher login failed!")
-#         return
-#     token = login_response.json()["access_token"]
+    print("Login Response:", login_response.text)
+    if login_response.status_code != 200:
+        print("Teacher login failed!")
+        return
+    token = login_response.json()["access_token"]
     
-#     # Step 2: Prepare headers with token
-#     headers = {
-#         "Authorization": f"Bearer {token}",
-#         'accept': 'application/json',
-#     }
+    # Step 2: Prepare headers with token
+    headers = {
+        "Authorization": f"Bearer {token}",
+        'accept': 'application/json',
+    }
 
-#     # Step 3: Prepare assignment data and PDF
-#     course_id = 1  # Replace with actual course ID
-#     assignment_data = {
-#         "name": "Quiz#1",
-#         "description": "You need to solve it without using Google",
-#         "deadline": "2024-10-16 12:00",  # YYYY-MM-DD HH:MM
-#         "grade": 10
-#     }
+    # Step 3: Prepare assignment data and PDF
+    course_id = 1  # Replace with actual course ID
+    assignment_data = {
+        "name": "Quiz#1",
+        "description": "You need to solve it without using Google",
+        "deadline": "2024-10-16 12:00",  # YYYY-MM-DD HH:MM
+        "grade": 10
+    }
 
-#     pdf_path = "/home/samadpls/Downloads/Extra/Maira_Resume.pdf"  # Replace with actual PDF path
-#     files = {
-#         "question_pdf": ("assignment.pdf", open(pdf_path, "rb"), "application/pdf")
-#     }
+    pdf_path = "/home/samadpls/Downloads/Extra/Maira_Resume.pdf"  # Replace with actual PDF path
+    files = {
+        "question_pdf": ("assignment.pdf", open(pdf_path, "rb"), "application/pdf")
+    }
     
-#     # Step 4: Create assignment
-#     response = requests.post(
-#         f"{BASE_URL}/teacher/course/{course_id}/assignment",
-#         headers=headers,
-#         data=assignment_data,
-#         files=files
-#     )
+    # Step 4: Create assignment
+    response = requests.post(
+        f"{BASE_URL}/teacher/course/{course_id}/assignment",
+        headers=headers,
+        data=assignment_data,
+        files=files
+    )
     
-#     # Step 5: Print response
-#     print("Status Code:", response.status_code)
-#     print("Response:", response.text)
+    # Step 5: Print response
+    print("Status Code:", response.status_code)
+    print("Response:", response.text)
 # In test.py
 def test_student_login_and_join_course():
     # Step 1: Student Login
     login_data = {
         'grant_type': 'password',
-        'username': 'std1@gmail.com',  # Student email
-        'password': '1234',
+        'username': 's1@gmail.com',  # Student email
+        'password': '12345',
         'scope': '',
         'client_id': '',
         'client_secret': ''
@@ -467,8 +475,8 @@ def test_student_assignment_workflow():
     # Step 1: Student Login
     login_data = {
         'grant_type': 'password',
-        'username': 'std1@gmail.com',
-        'password': '1234',
+        'username': 's1@gmail.com',
+        'password': '12345',
         'scope': '',
         'client_id': '',
         'client_secret': ''
@@ -526,15 +534,41 @@ def test_student_assignment_workflow():
     
     # print("Delete Submission Status:", response.status_code)
     # print("Delete Response:", response.text)
+def create_superadmin():
+    from utils.security import get_password_hash
 
-# if __name__ == "__main__":
-#     # test_add_university()
-#     # test_add_student()
-#     # test_create_course()
+    # Create engine and session
+    engine = create_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = SessionLocal()
+    
+    try:
+        # Create superadmin
+        superadmin = SuperAdmin(
+            email="sa@gmail.com",
+            password=get_password_hash("12345"),
+        )
+        
+        # Add to database
+        db.add(superadmin)
+        db.commit()
+        print("Superadmin created successfully!")
+        
+    except Exception as e:
+        print(f"Error creating superadmin: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    # create_superadmin()
+    test_add_university()
+    # test_add_student()
+    # test_create_course()
 #     # test_student_login_and_join_course()
 #     test_student_assignment_workflow()
     # test_create_assignment()
     # test_create_course()
     # test_add_university()
-    # test_add_student()  # Uncomment this line to test adding a student instead of a teacher.
-    # test_add_teacher()
+    test_add_student()  # Uncomment this line to test adding a student instead of a teacher.
+    test_add_teacher()
