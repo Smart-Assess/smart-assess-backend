@@ -77,31 +77,31 @@ async def add_student(
         "student_id": new_student.id,
     }
 
-@router.get("/universityadmin/student/{student_id}", response_model=dict)
-async def get_student(
-    student_id: int,
-    db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin),
-):
-    student = db.query(Student).filter(Student.student_id == student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
+# @router.get("/universityadmin/student/{student_id}", response_model=dict)
+# async def get_student(
+#     student_id: int,
+#     db: Session = Depends(get_db),
+#     current_admin: UniversityAdmin = Depends(get_current_admin),
+# ):
+#     student = db.query(Student).filter(Student.student_id == student_id).first()
+#     if not student:
+#         raise HTTPException(status_code=404, detail="Student not found")
 
-    return {
-        "success": True,
-        "status": 200,
-        "student": {
-            "student_id": student.student_id,
-            "full_name": student.full_name,
-            "student_id": student.student_id,
-            "department": student.department,
-            "email": student.email,
-            "batch": student.batch,
-            "section": student.section,
-            "created_at": student.created_at,
-            "university_id": student.university_id,
-        }
-    }
+#     return {
+#         "success": True,
+#         "status": 200,
+#         "student": {
+#             "student_id": student.student_id,
+#             "full_name": student.full_name,
+#             "student_id": student.student_id,
+#             "department": student.department,
+#             "email": student.email,
+#             "batch": student.batch,
+#             "section": student.section,
+#             "created_at": student.created_at,
+#             "university_id": student.university_id,
+#         }
+#     }
 
 @router.get("/universityadmin/student/{student_id}", response_model=dict)
 async def get_student(
