@@ -238,8 +238,8 @@ async def update_university(
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_admin: SuperAdmin = Depends(get_current_admin)
-):
-    # Check university exists and belongs to current admin
+    ):
+    # Check if university exists and belongs to the current admin
     university = db.query(University).filter(
         University.id == university_id,
         University.super_admin_id == current_admin.id
@@ -266,26 +266,41 @@ async def update_university(
 
     # Handle image upload if provided
     if image:
-        if university.image_url:
-            delete_success = delete_from_s3(university.image_url)
-            if not delete_success:
-                print(f"Failed to delete old image: {university.image_url}")
+        try:
+            # Delete the old image if it exists
+            if university.image_url:
+                delete_success = delete_from_s3(university.image_url)
+                if not delete_success:
+                    print(f"Failed to delete old image: {university.image_url}")
 
-        image_path = f"/tmp/{image.filename}"
-        with open(image_path, "wb") as buffer:
-            buffer.write(await image.read())
-        image_url = upload_to_s3(
-            folder_name="university_images",
-            file_name=image.filename,
-            file_path=image_path
-        )
-        if not image_url:
+            # Save the new image to a temporary file
+            image_path = f"/tmp/{image.filename}"
+            with open(image_path, "wb") as buffer:
+                buffer.write(await image.read())
+
+            # Upload the new image to S3
+            image_url = upload_to_s3(
+                folder_name="university_images",
+                file_name=image.filename,
+                file_path=image_path
+            )
+            if not image_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to upload university image"
+                )
+
+            # Clean up the temporary file
+            os.remove(image_path)
+
+            # Update the university's image URL
+            university.image_url = image_url
+        except Exception as e:
+            print(f"Error handling image upload: {e}")
             raise HTTPException(
                 status_code=500,
-                detail="Failed to upload university image"
+                detail="An error occurred while processing the image"
             )
-        os.remove(image_path)
-        university.image_url = image_url
 
     # Update university fields if provided
     if university_name:
@@ -303,6 +318,7 @@ async def update_university(
     if zipcode:
         university.zipcode = zipcode
 
+    # Commit changes to the database
     db.commit()
     db.refresh(university)
 

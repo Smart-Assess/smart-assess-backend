@@ -115,10 +115,36 @@ def test_add_university():
     except Exception as e:
         print(f"Error: {str(e)}")
 
+def test_update_university():
+    token = get_auth_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
 
+    university_id = 35  # Replace with a valid university ID
+    headers = {"Authorization": f"Bearer {token}"}
+
+    data = {
+        "street_address": "University Road",
+    }
+
+    response = requests.put(
+        f"{BASE_URL}/superadmin/university/{university_id}",
+        data=data,  # Use `data` for form fields
+        headers=headers
+    )
+
+    # Debugging output in case of failure
+    print("Response Status Code:", response.status_code)
+    print("Response JSON:", response.json())
+
+    assert response.status_code == 200, f"Unexpected status code: {response.status_code}"
+    response_json = response.json()
+    assert response_json["success"] is True
+    assert response_json["university"]["street_address"] == data["street_address"]
 
 if __name__ == "__main__":
-    test_add_university()
+    test_update_university()
     # create_superadmin(email="sa@gmail.com", password="12345")
     
 
