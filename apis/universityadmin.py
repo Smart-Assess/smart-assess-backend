@@ -15,7 +15,7 @@ from models.models import *
 from utils.dependencies import get_db
 from typing import Optional
 
-from utils.s3 import upload_to_s3
+from utils.s3 import upload_to_s3, delete_from_s3
 from utils.security import get_password_hash
 import os
 router = APIRouter()
@@ -76,32 +76,48 @@ async def add_student(
         "status": 201,
         "student_id": new_student.id,
     }
+@router.get("/universityadmin/students", response_model=dict)
+async def get_students(
+    page: int = 1,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_admin: UniversityAdmin = Depends(get_current_admin),
+):
+    offset = (page - 1) * limit
 
-# @router.get("/universityadmin/student/{student_id}", response_model=dict)
-# async def get_student(
-#     student_id: int,
-#     db: Session = Depends(get_db),
-#     current_admin: UniversityAdmin = Depends(get_current_admin),
-# ):
-#     student = db.query(Student).filter(Student.student_id == student_id).first()
-#     if not student:
-#         raise HTTPException(status_code=404, detail="Student not found")
+    total = db.query(Student).filter(Student.university_id == current_admin.university_id).count()
 
-#     return {
-#         "success": True,
-#         "status": 200,
-#         "student": {
-#             "student_id": student.student_id,
-#             "full_name": student.full_name,
-#             "student_id": student.student_id,
-#             "department": student.department,
-#             "email": student.email,
-#             "batch": student.batch,
-#             "section": student.section,
-#             "created_at": student.created_at,
-#             "university_id": student.university_id,
-#         }
-#     }
+    students = (
+        db.query(Student)
+        .filter(Student.university_id == current_admin.university_id)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    students_data = []
+    for student in students:
+        students_data.append({
+            "id": student.id,
+            "full_name": student.full_name,
+            "student_id": student.student_id,
+            "department": student.department,
+            "email": student.email,
+            "image_url": student.image_url,
+            "created_at": student.created_at,
+            "university_id": student.university_id,
+        })
+
+    return {
+        "success": True,
+        "status": 200,
+        "total": total,
+        "page": page,
+        "total_pages": (total + limit - 1) // limit,
+        "students": students_data,
+        "has_previous": page > 1,
+        "has_next": (offset + limit) < total,
+    }
 
 @router.get("/universityadmin/student/{student_id}", response_model=dict)
 async def get_student(
@@ -150,32 +166,77 @@ async def delete_student(
 
 @router.put("/universityadmin/student/{student_id}", response_model=dict)
 async def update_student(
-    student_id: str,  # Change to str
-    full_name: str = Form(...),
-    department: str = Form(...),
-    email: str = Form(...),
-    batch: str = Form(...),
-    section: str = Form(...),
+    student_id: str,
+    full_name: Optional[str] = Form(None),
+    department: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    batch: Optional[str] = Form(None),
+    section: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_admin: UniversityAdmin = Depends(get_current_admin)
 ):
-    student = db.query(Student).filter(Student.student_id == student_id).first()  # Change to student_id
+    student = db.query(Student).filter(Student.student_id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    existing_student = db.query(Student).filter(Student.email == email, Student.student_id != student_id).first()
-    if existing_student:
-        raise HTTPException(status_code=400, detail="Email already taken by another student")
+    if email:
+        existing_student = db.query(Student).filter(Student.email == email, Student.student_id != student_id).first()
+        if existing_student:
+            raise HTTPException(status_code=400, detail="Email already taken by another student")
 
-    student.full_name = full_name
-    student.department = department
-    student.email = email
-    student.batch = batch
-    student.section = section
-
+    if full_name:
+        student.full_name = full_name
+    if department:
+        student.department = department
+    if email:
+        student.email = email
+    if batch:
+        student.batch = batch
+    if section:
+        student.section = section
     if password:
         student.password = get_password_hash(password)
+
+    # Handle image upload if provided
+    if image:
+        try:
+            # Delete the old image if it exists
+            if student.image_url:
+                delete_success = delete_from_s3(student.image_url)
+                if not delete_success:
+                    print(f"Failed to delete old image: {student.image_url}")
+
+            # Save the new image to a temporary file
+            image_path = f"/tmp/{image.filename}"
+            with open(image_path, "wb") as buffer:
+                buffer.write(await image.read())
+
+            # Upload the new image to S3
+            image_url = upload_to_s3(
+                folder_name="student_images",
+                file_name=image.filename,
+                file_path=image_path
+            )
+            if not image_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to upload university image"
+                )
+
+            # Clean up the temporary file
+            os.remove(image_path)
+
+            # Update the university's image URL
+            student.image_url = image_url
+        except Exception as e:
+            print(f"Error handling image upload: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="An error occurred while processing the image"
+            )
+
 
     db.commit()
     db.refresh(student)
@@ -191,6 +252,7 @@ async def update_student(
             "email": student.email,
             "batch": student.batch,
             "section": student.section,
+            "image_url": student.image_url,
             "created_at": student.created_at,
             "university_id": student.university_id,
         }
@@ -290,44 +352,73 @@ async def delete_teacher(
 
 @router.put("/universityadmin/teacher/{teacher_id}", response_model=dict)
 async def update_teacher(
-    teacher_id: str,  # Change to str
-    full_name: str = Form(...),
-    department: str = Form(...),
-    email: str = Form(...),
+    teacher_id: str,  
+    full_name: Optional[str] = Form(None),
+    department: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_admin: UniversityAdmin = Depends(get_current_admin)
 ):
-    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()  # Change to teacher_id
+    """Update teacher details with all fields optional except teacher_id."""
+
+    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
-    existing_teacher = db.query(Teacher).filter(Teacher.email == email, Teacher.teacher_id != teacher_id).first()
-    if existing_teacher:
-        raise HTTPException(status_code=400, detail="Email already taken by another teacher")
+    if email:
+        existing_teacher = db.query(Teacher).filter(Teacher.email == email, Teacher.teacher_id != teacher_id).first()
+        if existing_teacher:
+            raise HTTPException(status_code=400, detail="Email already taken by another teacher")
+        teacher.email = email
 
-    teacher.full_name = full_name
-    teacher.department = department
-    teacher.email = email
+    if full_name:
+        teacher.full_name = full_name
+
+    if department:
+        teacher.department = department
 
     if password:
         teacher.password = get_password_hash(password)
 
+    # Handle image upload if provided
     if image:
-        image_path = f"/tmp/{image.filename}"
-        with open(image_path, "wb") as buffer:
-            buffer.write(await image.read())
-        image_url = upload_to_s3(
-            folder_name="teacher_images", file_name=image.filename, file_path=image_path
-        )
-        if not image_url:
+        try:
+            # Delete the old image if it exists
+            if teacher.image_url:
+                delete_success = delete_from_s3(teacher.image_url)
+                if not delete_success:
+                    print(f"Failed to delete old image: {teacher.image_url}")
+
+            # Save the new image to a temporary file
+            image_path = f"/tmp/{image.filename}"
+            with open(image_path, "wb") as buffer:
+                buffer.write(await image.read())
+
+            # Upload the new image to S3
+            image_url = upload_to_s3(
+                folder_name="teacher_images",
+                file_name=image.filename,
+                file_path=image_path
+            )
+            if not image_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to upload university image"
+                )
+
+            # Clean up the temporary file
+            os.remove(image_path)
+
+            # Update the university's image URL
+            teacher.image_url = image_url
+        except Exception as e:
+            print(f"Error handling image upload: {e}")
             raise HTTPException(
                 status_code=500,
-                detail="Failed to upload teacher image"
+                detail="An error occurred while processing the image"
             )
-        os.remove(image_path)
-        teacher.image_url = image_url
 
     db.commit()
     db.refresh(teacher)

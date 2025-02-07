@@ -8,7 +8,7 @@ BASE_URL = "http://127.0.0.1:8000"
 def get_auth_token():
     login_data = {
         'grant_type': 'password',
-        'username': 'ua@gmail.com',  # University admin email
+        'username': 'u@gmail.com',  # University admin email
         'password': '12345',
         'scope': '',
         'client_id': '',
@@ -71,6 +71,31 @@ def test_add_teacher():
     except Exception as e:
         print(f"Error adding teacher: {str(e)}")
 
+def test_update_teacher():
+    token = get_auth_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+
+    teacher_id = "324"  # Replace with actual teacher ID
+    new_password = "123456"
+
+    data = {
+
+        "password": new_password
+    }
+
+    try:
+        response = requests.put(
+            f"{BASE_URL}/universityadmin/teacher/{teacher_id}",
+            data=data,  # Use 'data' for Form fields
+            headers={'Authorization': f'Bearer {token}'}
+        )
+        print(f"Password Update Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+    except Exception as e:
+        print(f"Error updating teacher password: {str(e)}")
+
 def test_add_student():
     token = get_auth_token()
     if not token:
@@ -81,7 +106,7 @@ def test_add_student():
         "full_name": "Test Student",
         "student_id": "S124",
         "department": "Computer Science",
-        "email": "s1@gmail.com",
+        "email": "s124@gmail.com",
         "batch": "2024",
         "section": "A",
         "password": "12345"
@@ -109,8 +134,39 @@ def test_add_student():
     except Exception as e:
         print(f"Error adding student: {str(e)}")
 
+def test_update_student():
+    """Test updating a student's section."""
+    
+    token = get_auth_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+
+    student_id = "S124"  # Replace with an actual student ID
+    update_data = {"section": "B"}
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+
+    response = requests.put(
+        f"{BASE_URL}/universityadmin/student/{student_id}",
+        data=update_data,
+        headers=headers
+    )
+
+    assert response.status_code == 200, f"Failed to update student. Status Code: {response.status_code}"
+    response_json = response.json()
+    
+    assert response_json.get("student", {}).get("section") == "B", "Section update failed"
+
+    print("Test passed: Student section updated successfully.")
+    print(response_json)
 if __name__ == "__main__":
     # print("Testing Teacher Creation:")
     # test_add_teacher()
-    print("\nTesting Student Creation:")
-    test_add_student()
+    # print("\nTesting Student Creation:")
+    # test_add_student()
+    print(test_update_student())
