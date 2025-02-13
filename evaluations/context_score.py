@@ -1,5 +1,5 @@
 import re
-from .bleurt.bleurt import score as bleurt_score
+from ..utils.bleurt.bleurt import score as bleurt_score
 from typing import Dict, Optional
 import numpy as np
 from pymongo import MongoClient
