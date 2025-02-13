@@ -16,12 +16,12 @@ from sqlalchemy.orm import Session
 from apis.auth import get_current_admin
 from models.models import *
 from models.pydantic_model import EvaluationRequest
-from utils.assingment_score import AssignmentScoreCalculator
-from utils.context_score import SubmissionScorer
+from evaluations.assingment_score import AssignmentScoreCalculator
+from evaluations.context_score import SubmissionScorer
 from utils.dependencies import get_db
 from typing import List, Optional
 from bestrag import BestRAG
-from utils.plagiarism import PDFQuestionAnswerExtractor, PlagiarismChecker
+from evaluations.plagiarism import PDFQuestionAnswerExtractor, PlagiarismChecker
 from utils.s3 import delete_from_s3, download_from_s3, upload_to_s3
 # from utils.security import get_password_hash
 from bson import ObjectId
