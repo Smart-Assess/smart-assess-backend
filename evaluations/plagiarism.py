@@ -1,4 +1,4 @@
-import pymongo
+from pymongo import UpdateOne, MongoClient
 from datetime import datetime, timezone
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -14,7 +14,7 @@ class PlagiarismChecker:
         self.similarity_results = {}
 
         # MongoDB setup
-        self.client = pymongo.MongoClient(
+        self.client = MongoClient(
             "mongodb+srv://smartassessfyp:SobazFCcD4HHDE0j@fyp.ad9fx.mongodb.net/?retryWrites=true&w=majority"
         )
         self.db = self.client['FYP']
@@ -89,54 +89,75 @@ class PlagiarismChecker:
                         question_result["copied_sentence"] = copied_sentence
 
                 self.similarity_results[pdf_file][question_key] = question_result
-
+    
     def save_results_to_mongo(self):
-        """Save all evaluation results for a student in a single document"""
+        """Save plagiarism scores in unified evaluation document"""
         for pdf_file, qa_results in self.questions_answers_by_pdf.items():
             similarity_data = self.similarity_results.get(pdf_file, {})
             
             # Calculate overall similarity
             total_similarity = 0
             question_count = 0
-            question_evaluations = []
+            question_updates = []
     
             for q_key in qa_results:
                 if q_key.startswith("Question#"):
+                    q_num = int(q_key.split('#')[1])
                     if q_key in similarity_data:
                         max_similarity = similarity_data[q_key].get("max_similarity", 0)
                         copied_sentence = similarity_data[q_key].get("copied_sentence", "")
                         
-                        question_evaluations.append({
-                            "question_key": q_key,
-                            "plagiarism_score": round(max_similarity, 4),
-                            "copied_sentence": copied_sentence
-                        })
+                        # Create proper UpdateOne object
+                        question_updates.append(UpdateOne(
+                            {
+                                "course_id": self.course_id,
+                                "assignment_id": self.assignment_id,
+                                "pdf_file": pdf_file,
+                                "questions.question_number": q_num
+                            },
+                            {
+                                "$set": {
+                                    "questions.$.scores.plagiarism": {
+                                        "score": round(max_similarity, 4),
+                                        "copied_sentence": copied_sentence,
+                                        "evaluated_at": datetime.now(timezone.utc)
+                                    }
+                                }
+                            }
+                        ))
                         
                         total_similarity += max_similarity
                         question_count += 1
     
-            # Prepare the complete evaluation document
-            evaluation_document = {
-                "course_id": self.course_id,
-                "assignment_id": self.assignment_id,
-                "pdf_file": pdf_file,
-                "evaluation_type": "plagiarism",
-                "questions": question_evaluations,
-                "plagiarism_overall_score": round(total_similarity / question_count, 4) if question_count > 0 else 0,
-                "evaluated_at": datetime.now(timezone.utc)
-            }
-    
-            # Upsert the evaluation document
+            # First ensure document exists with questions array
             self.results_collection.update_one(
                 {
                     "course_id": self.course_id,
                     "assignment_id": self.assignment_id,
-                    "pdf_file": pdf_file,
-                    "evaluation_type": "plagiarism"
+                    "pdf_file": pdf_file
                 },
-                {"$set": evaluation_document},
+                {
+                    "$set": {
+                        "overall_scores.plagiarism": {
+                            "score": round(total_similarity / question_count, 4) if question_count > 0 else 0,
+                            "evaluated_at": datetime.now(timezone.utc)
+                        }
+                    },
+                    "$setOnInsert": {
+                        "questions": [
+                            {
+                                "question_number": i,
+                                "scores": {}
+                            } for i in range(1, len(qa_results)//2 + 1)
+                        ]
+                    }
+                },
                 upsert=True
             )
+    
+            # Execute question updates if any
+            if question_updates:
+                self.results_collection.bulk_write(question_updates)
 
     def run(self):
         # Fetch Q&A pairs from MongoDB
