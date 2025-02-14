@@ -3,7 +3,7 @@ import sys
 import os
 import numpy as np
 from datetime import datetime, timezone
-from pymongo import MongoClient
+from pymongo import MongoClient, UpdateOne
 from fastembed import TextEmbedding
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -116,25 +116,58 @@ class ContextScorer:
     def save_results_to_mongo(self, pdf_file: str, results: dict):
         """Update evaluation document with context scores"""
         
-        # Prepare context-specific updates
-        context_updates = {
-            "context_scores": results["questions"],
-            "context_overall_score": results["context_overall_score"],
-            "context_evaluated_at": datetime.now(timezone.utc)
-        }
-    
-        # Update only context fields in evaluation document
+        # First ensure document exists with questions array
         self.results_collection.update_one(
             {
                 "course_id": self.course_id,
                 "assignment_id": self.assignment_id,
-                "pdf_file": pdf_file,
+                "pdf_file": pdf_file
             },
             {
-                "$set": context_updates
+                "$setOnInsert": {
+                    "questions": [
+                        {
+                            "question_number": q_num,
+                            "scores": {}
+                        } for q_num in range(1, len(results["questions"]) + 1)
+                    ]
+                }
             },
             upsert=True
         )
+    
+        # Then update scores for each question
+        updates = []
+        for question in results["questions"]:
+            q_num = int(question["question_key"].split('#')[1])
+            updates.append(
+                UpdateOne(
+                    {
+                        "course_id": self.course_id,
+                        "assignment_id": self.assignment_id,
+                        "pdf_file": pdf_file,
+                        "questions.question_number": q_num
+                    },
+                    {
+                        "$set": {
+                            "questions.$.scores.context": {
+                                "score": round(question["context_score"], 4),
+                                "evaluated_at": datetime.now(timezone.utc)
+                            },
+                            "overall_scores.context": {
+                                "score": round(results["context_overall_score"], 4),
+                                "evaluated_at": datetime.now(timezone.utc)
+                            }
+                        }
+                    }
+                )
+            )
+    
+        # Execute updates
+        if updates:
+            self.results_collection.bulk_write(updates)
+
+
     def clean_and_tokenize_text(self, data):
         cleaned_texts = ""
         for point in data.points:
