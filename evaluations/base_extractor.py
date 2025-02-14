@@ -89,7 +89,7 @@ class PDFQuestionAnswerExtractor:
             "student_id": self.student_id,
             "pdf_file": pdf_file,
             "qa_pairs": qa_pairs,
-            "extracted_at": datetime.now(timezone.UTC)
+            "extracted_at": datetime.now(timezone.utc)
         }
         self.collection.update_one(
             {
