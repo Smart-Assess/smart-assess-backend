@@ -4,7 +4,7 @@ import requests
 import re
 from tempfile import NamedTemporaryFile
 import pymongo
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 class PDFQuestionAnswerExtractor:
     def __init__(self, pdf_files: List[str], course_id: int, assignment_id: int, is_teacher: bool, student_id: str = None):
@@ -89,7 +89,7 @@ class PDFQuestionAnswerExtractor:
             "student_id": self.student_id,
             "pdf_file": pdf_file,
             "qa_pairs": qa_pairs,
-            "extracted_at": datetime.now(UTC)
+            "extracted_at": datetime.now(timezone.UTC)
         }
         self.collection.update_one(
             {
