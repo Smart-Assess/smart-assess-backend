@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from apis.auth import get_current_admin
 from models.models import *
 from models.pydantic_model import EvaluationRequest
-from evaluations.assingment_score import AssignmentScoreCalculator
+from evaluations.assignment_score import AssignmentScoreCalculator
 from evaluations.context_score import SubmissionScorer
 from utils.dependencies import get_db
 from typing import List, Optional
