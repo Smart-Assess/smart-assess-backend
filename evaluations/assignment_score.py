@@ -1,8 +1,6 @@
 import numpy as np
 from sqlalchemy.orm import Session
-from datetime import datetime
 from typing import Dict
-from models.models import AssignmentEvaluation
 
 class AssignmentScoreCalculator:
     def __init__(self, total_grade: float, num_questions: int, db: Session):
@@ -39,7 +37,6 @@ class AssignmentScoreCalculator:
 
     def calculate_submission_evaluation(
         self,
-        submission_id: int,
         question_results: Dict[str, Dict[str, float]]
     ) -> Dict:
         total_score = 0.0
