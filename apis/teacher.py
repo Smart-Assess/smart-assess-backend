@@ -3,7 +3,7 @@ import json
 import re
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
-from pymongo import MongoClient
+from utils.mongodb import mongo_db
 from fastapi import (
     APIRouter,
     Depends,
@@ -40,8 +40,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-mongo_client = MongoClient(os.getenv("MONGO_URI"))
-db_mongo = mongo_client['FYP']
+db_mongo = mongo_db.db
 
 teacher_rag_cache = {}
 # >> Define the router for the API
