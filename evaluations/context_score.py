@@ -3,13 +3,14 @@ import sys
 import os
 import numpy as np
 from datetime import datetime, timezone
-from pymongo import MongoClient, UpdateOne
+from pymongo import UpdateOne
 from fastembed import TextEmbedding
 from sklearn.metrics.pairwise import cosine_similarity
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 from utils.bleurt.bleurt import score as bleurt_score
+from utils.mongodb import mongo_db
 
 class TextSimilarity:
     def __init__(self, model_name='BAAI/bge-small-en-v1.5'):
@@ -37,8 +38,7 @@ class ContextScorer:
         self.scorer = bleurt_score.BleurtScorer()
         
         # MongoDB setup
-        self.client = MongoClient("mongodb+srv://smartassessfyp:SobazFCcD4HHDE0j@fyp.ad9fx.mongodb.net/?retryWrites=true&w=majority")
-        self.db = self.client['FYP']
+        self.db = mongo_db.db
         self.qa_collection = self.db['qa_extractions']
         self.results_collection = self.db['evaluation_results']
         
