@@ -996,6 +996,7 @@ async def evaluate_submissions(
 
             # Download student submissions
             submission_paths = {}
+            submission_ids = []
             for submission in submissions:
                 temp_file = NamedTemporaryFile(delete=False, suffix='.pdf', mode='wb')
                 if not download_from_s3(submission.submission_pdf_url, temp_file.name):
@@ -1005,6 +1006,7 @@ async def evaluate_submissions(
                 
                 if os.path.getsize(temp_file.name) > 0:
                     submission_paths[submission.id] = temp_file.name
+                    submission_ids.append(submission.id)
                     temp_files.append(temp_file.name)
 
             # Create a list of all PDF files (teacher + student submissions)
@@ -1012,7 +1014,7 @@ async def evaluate_submissions(
 
             # Initialize AssignmentEvaluator
             evaluator = AssignmentEvaluator(course_id=course_id, assignment_id=assignment_id, request=request, rag=rag, db=db)
-            evaluator.run(pdf_files=pdf_files, total_grade=assignment.grade)
+            evaluator.run(pdf_files=pdf_files, total_grade=assignment.grade, submission_ids=submission_ids)
 
             # Collect evaluation results
             for submission in submissions:
