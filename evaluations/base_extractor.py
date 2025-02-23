@@ -3,7 +3,7 @@ import pdfplumber
 import requests
 import re
 from tempfile import NamedTemporaryFile
-import pymongo
+from utils.mongodb import mongo_db
 from datetime import datetime, timezone
 
 class PDFQuestionAnswerExtractor:
@@ -15,10 +15,8 @@ class PDFQuestionAnswerExtractor:
         self.student_id = student_id
 
         # MongoDB setup
-        self.client = pymongo.MongoClient(
-            "mongodb+srv://smartassessfyp:SobazFCcD4HHDE0j@fyp.ad9fx.mongodb.net/?retryWrites=true&w=majority"
-        )
-        self.db = self.client['FYP']
+        
+        self.db = mongo_db.db
         self.collection = self.db['qa_extractions']
 
     def extract_text_from_pdf(self, pdf_file: str) -> str:
