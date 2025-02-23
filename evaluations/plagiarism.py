@@ -1,8 +1,8 @@
-from pymongo import UpdateOne, MongoClient
 from datetime import datetime, timezone
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from utils.mongodb import mongo_db
 class PlagiarismChecker:
     def __init__(self, course_id: int, assignment_id: int, similarity_threshold: float = 0.8):
         self.course_id = course_id
@@ -14,10 +14,7 @@ class PlagiarismChecker:
         self.similarity_results = {}
 
         # MongoDB setup
-        self.client = MongoClient(
-            "mongodb+srv://smartassessfyp:SobazFCcD4HHDE0j@fyp.ad9fx.mongodb.net/?retryWrites=true&w=majority"
-        )
-        self.db = self.client['FYP']
+        self.db = mongo_db.db
         self.qa_collection = self.db['qa_extractions']
         self.results_collection = self.db['evaluation_results']
 
