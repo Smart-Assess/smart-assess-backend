@@ -50,16 +50,16 @@ class AssignmentEvaluator:
 
         return teacher_questions, questions_answers_by_pdf
 
-    def run(self, pdf_files, total_grade):
+    def run(self, pdf_files, total_grade, submission_ids):
         self.extract_qa_pairs(pdf_files)
         teacher_questions, questions_answers_by_pdf = self.fetch_qa_pairs()
 
-        _ = self.context_scorer.run(teacher_questions, questions_answers_by_pdf, total_grade)
+        _ = self.context_scorer.run(teacher_questions, questions_answers_by_pdf)
         if self.plagiarism_checker:
             _ = self.plagiarism_checker.run(teacher_questions, questions_answers_by_pdf)
 
         # Combine results and calculate total scores
-        for pdf_file in pdf_files:
+        for pdf_file, submission_id in zip(pdf_files[1:], submission_ids):
             submission_data = mongo_db.db['evaluation_results'].find_one({
                 "course_id": self.course_id,
                 "assignment_id": self.assignment_id,
@@ -88,13 +88,12 @@ class AssignmentEvaluator:
                     db=self.db
                 )
                 evaluation_result = score_calculator.calculate_submission_evaluation(
-                    submission_id=submission_data.get("submission_id", 0),
                     question_results=question_results
                 )
 
                 # Save to PostgreSQL
                 evaluation = AssignmentEvaluation(
-                    submission_id=submission_data.get("submission_id", 0),
+                    submission_id=submission_id,
                     total_score=evaluation_result["total_score"],
                     plagiarism_score=evaluation_result["avg_plagiarism_score"],
                     ai_detection_score=evaluation_result["avg_ai_score"],
