@@ -1,8 +1,6 @@
 import numpy as np
 from sqlalchemy.orm import Session
-from datetime import datetime
 from typing import Dict
-from models.models import AssignmentEvaluation
 
 class AssignmentScoreCalculator:
     def __init__(self, total_grade: float, num_questions: int, db: Session):
@@ -39,7 +37,6 @@ class AssignmentScoreCalculator:
 
     def calculate_submission_evaluation(
         self,
-        submission_id: int,
         question_results: Dict[str, Dict[str, float]]
     ) -> Dict:
         total_score = 0.0
@@ -73,35 +70,20 @@ class AssignmentScoreCalculator:
         total_penalty = avg_plagiarism_score + avg_ai_score + avg_grammar_score
         final_total_score = total_score - total_penalty
 
-        # Save evaluation to database (example, adjust as needed)
-        evaluation = AssignmentEvaluation(
-            submission_id=submission_id,
-            total_score=final_total_score,
-            plagiarism_score=avg_plagiarism_score,
-            ai_detection_score=avg_ai_score,
-            grammar_score=avg_grammar_score,
-            feedback="",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        self.db.add(evaluation)
-        self.db.commit()
+        # Add total score for each question to the question results
+        for q_key, scores in question_results.items():
+            scores["total_score"] = self.calculate_question_score(
+                context_score=scores.get("context_score"),
+                plagiarism_score=scores.get("plagiarism_score"),
+                ai_score=scores.get("ai_score"),
+                grammar_score=scores.get("grammar_score")
+            )
 
         return {
             "total_score": np.round(final_total_score, 4),
             "avg_context_score": np.round(avg_context_score, 4),
             "avg_plagiarism_score": np.round(avg_plagiarism_score, 4),
+            "avg_ai_score": np.round(avg_ai_score, 4),
+            "avg_grammar_score": np.round(avg_grammar_score, 4),
             "questions": question_results
         }
-# def serialize_evaluation(eval_result: AssignmentEvaluation) -> dict:
-#     """Convert AssignmentEvaluation model to dictionary"""
-#     return {
-#         "submission_id": eval_result.submission_id,
-#         "total_score": eval_result.total_score,
-#         "plagiarism_score": eval_result.plagiarism_score,
-#         "ai_detection_score": eval_result.ai_detection_score,
-#         "grammar_score": eval_result.grammar_score,
-#         "feedback": eval_result.feedback,
-#         "created_at": eval_result.created_at.isoformat() if eval_result.created_at else None,
-#         "updated_at": eval_result.updated_at.isoformat() if eval_result.updated_at else None
-#     }

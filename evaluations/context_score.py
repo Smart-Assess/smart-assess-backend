@@ -3,13 +3,14 @@ import sys
 import os
 import numpy as np
 from datetime import datetime, timezone
-from pymongo import MongoClient, UpdateOne
+from pymongo import UpdateOne
 from fastembed import TextEmbedding
 from sklearn.metrics.pairwise import cosine_similarity
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 from utils.bleurt.bleurt import score as bleurt_score
+from utils.mongodb import mongo_db
 
 class TextSimilarity:
     def __init__(self, model_name='BAAI/bge-small-en-v1.5'):
@@ -37,9 +38,7 @@ class ContextScorer:
         self.scorer = bleurt_score.BleurtScorer()
         
         # MongoDB setup
-        self.client = MongoClient("mongodb+srv://smartassessfyp:SobazFCcD4HHDE0j@fyp.ad9fx.mongodb.net/?retryWrites=true&w=majority")
-        self.db = self.client['FYP']
-        self.qa_collection = self.db['qa_extractions']
+        self.db = mongo_db.db
         self.results_collection = self.db['evaluation_results']
         
         # Scoring weights
@@ -84,8 +83,8 @@ class ContextScorer:
         
         return round(combined_score * total_score_per_question, 4)
 
-    def process_submission(self, qa_pairs: dict, total_score: float = 100.0) -> dict:
-        num_questions = len([k for k in qa_pairs if k.startswith("Question#")])
+    def process_submission(self, teacher_questions: dict, qa_pairs: dict, total_score: float = 100.0) -> dict:
+        num_questions = len([k for k in teacher_questions if k.startswith("Question#")])
         score_per_question = total_score / num_questions if num_questions > 0 else 0
         
         question_scores = []
@@ -95,8 +94,8 @@ class ContextScorer:
             q_key = f"Question#{q_num}"
             a_key = f"Answer#{q_num}"
             
-            if q_key in qa_pairs and a_key in qa_pairs:
-                question = qa_pairs[q_key]
+            if q_key in teacher_questions and a_key in qa_pairs:
+                question = teacher_questions[q_key]
                 answer = qa_pairs[a_key]
                 
                 if question and answer:
@@ -167,45 +166,16 @@ class ContextScorer:
         if updates:
             self.results_collection.bulk_write(updates)
 
-
-    def clean_and_tokenize_text(self, data):
-        cleaned_texts = ""
-        for point in data.points:
-            if 'text' in point.payload:
-                raw_text = point.payload['text']
-                cleaned_text = re.sub(r'[●■○]', '', raw_text)
-                cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-                tokens = cleaned_text.split()
-                filtered_tokens = [
-                    token.lower()
-                    for token in tokens
-                    if token.isalnum()
-                ]
-                cleaned_text = ' '.join(filtered_tokens)
-                cleaned_texts += cleaned_text
-        return cleaned_texts
-
-    def run(self, total_score: float = 100.0) -> dict:
-        # Fetch student submissions
-        print("Fetching student submissions...")
-        cursor = self.qa_collection.find({
-            "course_id": self.course_id,
-            "assignment_id": self.assignment_id,
-            "is_teacher": False
-        })
-
+    def run(self, teacher_questions, questions_answers_by_pdf, total_score: float = 100.0) -> dict:
         final_results = {
             "course_id": self.course_id,
             "assignment_id": self.assignment_id,
             "results": []
         }
 
-        for doc in cursor:
-            pdf_file = doc["pdf_file"]
-            qa_pairs = doc["qa_pairs"]
-            
+        for pdf_file, qa_pairs in questions_answers_by_pdf.items():
             # Process submission
-            results = self.process_submission(qa_pairs, total_score=total_score)
+            results = self.process_submission(teacher_questions, qa_pairs, total_score=total_score)
             
             # Save to MongoDB
             self.save_results_to_mongo(pdf_file, results)
@@ -225,7 +195,25 @@ class ContextScorer:
 
         return final_results
 
+    def clean_and_tokenize_text(self, data):
+        cleaned_texts = ""
+        for point in data.points:
+            if 'text' in point.payload:
+                raw_text = point.payload['text']
+                cleaned_text = re.sub(r'[●■○]', '', raw_text)
+                cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+                tokens = cleaned_text.split()
+                filtered_tokens = [
+                    token.lower()
+                    for token in tokens
+                    if token.isalnum()
+                ]
+                cleaned_text = ' '.join(filtered_tokens)
+                cleaned_texts += cleaned_text
+        return cleaned_texts
+
 if __name__ == "__main__":
+
     from bestrag import BestRAG
     
     rag = BestRAG(
@@ -235,5 +223,5 @@ if __name__ == "__main__":
     )
     
     scorer = ContextScorer(course_id=1, assignment_id=1, rag=rag)
-    results = scorer.run(3)
+    results = scorer.run({},{})
     print(results)

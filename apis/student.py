@@ -1,6 +1,6 @@
 import os
 from fastapi import APIRouter, Depends, File, HTTPException, Form, UploadFile
-from pymongo import MongoClient
+from utils.mongodb import mongo_db
 from sqlalchemy.orm import Session
 from models.models import *
 from utils.dependencies import get_db
@@ -10,10 +10,6 @@ import uuid
 from datetime import datetime
 
 router = APIRouter()
-
-# Create a global MongoClient instance
-mongo_client = MongoClient(os.getenv("MONGO_URI"))
-db_mongo = mongo_client['FYP']
 
 @router.post("/student/course/join", response_model=dict)
 async def join_course(
@@ -329,7 +325,8 @@ async def get_student_results(
 
             for evaluation in evaluations:
                 # Get MongoDB detailed results
-                submission_data = db_mongo.submissions.find_one({
+                submissions_collection = mongo_db.get_collection('submissions')
+                submission_data = submissions_collection.find_one({
                     "assignment_id": submission.assignment_id,
                     "student_id": current_student.id,
                     "PDF_File": submission.submission_pdf_url
@@ -405,7 +402,8 @@ async def get_assignment_result(
     ).first()
 
     try:
-        submission_data = db_mongo.submissions.find_one({
+        submissions_collection = mongo_db.get_collection('submissions')
+        submission_data = submissions_collection.find_one({
             "assignment_id": assignment_id,
             "student_id": current_student.id,
             "PDF_File": submission.submission_pdf_url
