@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from pymongo import UpdateOne
 
 from utils.mongodb import mongo_db
 class PlagiarismChecker:
@@ -15,22 +16,7 @@ class PlagiarismChecker:
 
         # MongoDB setup
         self.db = mongo_db.db
-        self.qa_collection = self.db['qa_extractions']
         self.results_collection = self.db['evaluation_results']
-
-    def fetch_qa_pairs(self):
-        """Fetch Q&A pairs from MongoDB for the given course and assignment"""
-        cursor = self.qa_collection.find({
-            "course_id": self.course_id,
-            "assignment_id": self.assignment_id
-        })
-
-        for document in cursor:
-            pdf_file = document['pdf_file']
-            if document['is_teacher']:
-                self.teacher_questions = document.get('qa_pairs', {})
-            else:
-                self.questions_answers_by_pdf[pdf_file] = document.get('qa_pairs', {})
 
     def find_common_parts(self, answer_1: str, answer_2: str) -> str:
         """Find common parts between two answers by comparing sentences."""
@@ -156,9 +142,9 @@ class PlagiarismChecker:
             if question_updates:
                 self.results_collection.bulk_write(question_updates)
 
-    def run(self):
-        # Fetch Q&A pairs from MongoDB
-        self.fetch_qa_pairs()
+    def run(self, teacher_questions, questions_answers_by_pdf):
+        self.teacher_questions = teacher_questions
+        self.questions_answers_by_pdf = questions_answers_by_pdf
         
         # Compare answers between students
         self.compare_answers()
@@ -209,7 +195,7 @@ class PlagiarismChecker:
 
 
 # Run the plagiarism checker
-if __name__ == "__main__":
-    checker = PlagiarismChecker(course_id=1, assignment_id=1, similarity_threshold=0.01)
-    results = checker.run()
-    print(results)
+# if __name__ == "__main__":
+#     checker = PlagiarismChecker(course_id=1, assignment_id=1, similarity_threshold=0.01)
+#     results = checker.run()
+#     print(results)
