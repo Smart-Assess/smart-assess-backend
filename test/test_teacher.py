@@ -41,7 +41,7 @@ def test_create_course():
         return
     
     data = {
-        "name": "Test Course",
+        "name": "Test Course 2",
         "batch": "2024",
         "group": "A",
         "section": "Morning",
@@ -50,7 +50,7 @@ def test_create_course():
 
     # Add course PDF
     files = {
-        'pdfs': ('course.pdf', open('/home/samadpls/proj/fyp/smart-assess-backend/course.pdf', 'rb'), 'application/pdf')
+        'pdfs': ('course.pdf', open('/home/myra/Downloads/Software-metrics.pdf', 'rb'), 'application/pdf')
     }
 
     # Combine data and files
@@ -85,7 +85,7 @@ def test_create_assignment(course_id):
     
     try:
         # Verify PDF exists
-        pdf_path = '/home/samadpls/proj/fyp/smart-assess-backend/teacher.pdf'
+        pdf_path = '/home/myra/Downloads/Software-metrics.pdf'
         if not Path(pdf_path).exists():
             print(f"PDF not found at {pdf_path}")
             return
@@ -210,10 +210,10 @@ def test_evaluate_submissions():
             print(f"Test Error: {str(e)}")
 
 if __name__ == "__main__":
-    print("Testing Assingment Evalution:")
-    test_evaluate_submissions()
+    # print("Testing Assingment Evalution:")
+    # test_evaluate_submissions()
     # print("Testing Course Creation:")
-    # course_id = test_create_course()
+    course_id = test_create_course()
     
     # print("\nTesting Assignment Creation:")
     # assignment_id = test_create_assignment(1)

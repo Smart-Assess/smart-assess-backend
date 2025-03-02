@@ -76,26 +76,29 @@ def test_update_teacher():
     if not token:
         print("Failed to get authorization token")
         return
-
-    teacher_id = "324"  # Replace with actual teacher ID
-    new_password = "123456"
-
-    data = {
-
-        "password": new_password
+    
+    teacher_id = "T123"  # Replace with actual teacher ID
+    update_data = {
+        "department": "Computer Science"
     }
 
-    try:
-        response = requests.put(
-            f"{BASE_URL}/universityadmin/teacher/{teacher_id}",
-            data=data,  # Use 'data' for Form fields
-            headers={'Authorization': f'Bearer {token}'}
-        )
-        print(f"Password Update Status: {response.status_code}")
-        print(f"Response: {response.json()}")
-    except Exception as e:
-        print(f"Error updating teacher password: {str(e)}")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        'accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 
+    response = requests.put(
+        f"{BASE_URL}/universityadmin/teacher/{teacher_id}",
+        data=update_data,
+        headers=headers
+    )
+
+    print("Status Code:", response.status_code)
+    print("Response:", response.json())
+
+    assert response.status_code == 200, "Failed to update teacher"
+    assert response.json()["teacher"]["department"] == "Computer Science", "Department update failed"
 def test_add_student():
     token = get_auth_token()
     if not token:
@@ -165,8 +168,9 @@ def test_update_student():
     print("Test passed: Student section updated successfully.")
     print(response_json)
 if __name__ == "__main__":
-    # print("Testing Teacher Creation:")
+    print("Testing Teacher Creation:")
     # test_add_teacher()
+    print(test_update_teacher())
     # print("\nTesting Student Creation:")
     # test_add_student()
-    print(test_update_student())
+    # print(test_update_student())
