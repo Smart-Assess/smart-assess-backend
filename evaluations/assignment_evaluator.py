@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
 from evaluations.base_extractor import PDFQuestionAnswerExtractor
 from evaluations.context_score import ContextScorer
 from evaluations.plagiarism import PlagiarismChecker
+from evaluations.grammar import GrammarChecker
 from evaluations.assignment_score import AssignmentScoreCalculator
 from utils.mongodb import mongo_db
 from models.models import AssignmentEvaluation
@@ -24,8 +25,11 @@ class AssignmentEvaluator:
         self.qa_extractor = PDFQuestionAnswerExtractor([], course_id, assignment_id, is_teacher=False)
         self.context_scorer = ContextScorer(course_id, assignment_id, rag)
         self.plagiarism_checker = None
+        self.grammar_checker = None
         if request.enable_plagiarism:
             self.plagiarism_checker = PlagiarismChecker(course_id, assignment_id)
+        if request.enable_grammar:
+            self.grammar_checker = GrammarChecker()
 
     def extract_qa_pairs(self, pdf_files):
         self.qa_extractor.pdf_files = pdf_files
@@ -74,6 +78,12 @@ class AssignmentEvaluator:
                     plagiarism_score = question["scores"].get("plagiarism", {}).get("score", 0)
                     ai_score = question["scores"].get("ai_detection", {}).get("score", 0)
                     grammar_score = question["scores"].get("grammar", {}).get("score", 0)
+                    
+                    # Evaluate grammar if enabled
+                    if self.grammar_checker:
+                        answer_text = question["answer"]
+                        corrected_text, grammar_score = self.grammar_checker.evaluate(answer_text)
+                    
                     question_results[f"Question#{q_num}"] = {
                         "context_score": context_score,
                         "plagiarism_score": plagiarism_score,
@@ -105,6 +115,17 @@ class AssignmentEvaluator:
 
                 # Save individual question results to MongoDB
                 for q_num, scores in evaluation_result["questions"].items():
+                    update_data = {
+                        "questions.$.scores.total": {
+                            "score": scores["total_score"],
+                            "evaluated_at": datetime.now(timezone.utc)
+                        }
+                    }
+                    if self.grammar_checker:
+                        update_data["questions.$.scores.grammar"] = {
+                            "score": scores["grammar_score"],
+                            "evaluated_at": datetime.now(timezone.utc)
+                        }
                     mongo_db.db['evaluation_results'].update_one(
                         {
                             "course_id": self.course_id,
@@ -113,12 +134,7 @@ class AssignmentEvaluator:
                             "questions.question_number": int(q_num.split('#')[1])
                         },
                         {
-                            "$set": {
-                                "questions.$.scores.total": {
-                                    "score": scores["total_score"],
-                                    "evaluated_at": datetime.now(timezone.utc)
-                                }
-                            }
+                            "$set": update_data
                         }
                     )
 
@@ -137,7 +153,7 @@ if __name__ == "__main__":
         collection_name="fyptest"
     )
 
-    request = EvaluationRequest(enable_plagiarism=True)
+    request = EvaluationRequest(enable_plagiarism=False, enable_grammar=True)
 
     # Get a new database session
     db = next(get_db())
@@ -147,11 +163,6 @@ if __name__ == "__main__":
         evaluator.run(pdf_files=[
             "/home/samadpls/proj/fyp/smart-assess-backend/37.pdf",
             "/home/samadpls/proj/fyp/smart-assess-backend/p1.pdf"
-        ], total_grade=3)
-        
-        # context = ContextScorer(course_id=1, assignment_id=1, rag=rag)
-        # print(context.run(t, q,3))
-        # # plgobj = PlagiarismChecker(course_id=1, assignment_id=1, similarity_threshold=0.01)
-        # # print(plgobj.run(t, q))
+        ], total_grade=3, submission_ids=[1, 2])
     finally:
         db.close()
