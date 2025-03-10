@@ -637,9 +637,15 @@ async def create_assignment(
             is_teacher = True
         )
         teacher_text = extractor.extract_text_from_pdf(temp_file_path)
-        valid_format = any("Question#" in page and "Answer#" in page for page in teacher_text)
+        print(teacher_text)
+        # for page in teacher_text:
+        #     print("Page:::",page)
+        parsed_dict= extractor.parse_qa(teacher_text)
+        # valid_format = any("Question#" in teacher_text and "Answer#" in teacher_text)
+        print("parsed_dict: ",parsed_dict)
         
-        if not valid_format:
+        
+        if not parsed_dict:
             raise HTTPException(
                 status_code=400,
                 detail="Assignment PDF is not in the correct format. It must contain 'Question#' and 'Answer#'."
@@ -693,150 +699,153 @@ async def create_assignment(
 async def update_assignment(
     course_id: int,
     assignment_id: int,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
-    deadline: Optional[str] = None, # YYYY-MM-DD HH:MM
-    grade: Optional[int] = None,
+    name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    deadline: Optional[str] = Form(None),  # Format: "YYYY-MM-DD HH:MM"
+    grade: Optional[int] = Form(None),
     question_pdf: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin)
 ):
-    # Verify course and assignment ownership
+    """
+    Update an assignment with optional fields:
+    - Basic information (name, description, deadline, grade)
+    - Question PDF file
+    
+    All fields are optional except course_id and assignment_id.
+    """
+    # First, verify course exists and belongs to the teacher
     course = db.query(Course).filter(
         Course.id == course_id,
         Course.teacher_id == current_teacher.id
     ).first()
-
+    
     if not course:
         raise HTTPException(
             status_code=404,
             detail="Course not found or you don't have access"
         )
-
+    
+    # Find the assignment
     assignment = db.query(Assignment).filter(
         Assignment.id == assignment_id,
         Assignment.course_id == course_id
     ).first()
-
+    
     if not assignment:
         raise HTTPException(
             status_code=404,
             detail="Assignment not found"
         )
-
-    # Handle PDF update if provided
-    if question_pdf and not isinstance(question_pdf, str):
-        if question_pdf.content_type != 'application/pdf':
-            raise HTTPException(
-                status_code=400,
-                detail="Question file must be a PDF"
-            )
-
-        try:
-            # Create temporary file for PDF extraction
-            with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-                content = await question_pdf.read()
-                temp_file.write(content)
-                temp_file_path = temp_file.name
-
-            # Validate the format of the question PDF
-            extractor = PDFQuestionAnswerExtractor(
-                pdf_files=[temp_file_path]
-            )
-            teacher_text = extractor.extract_text_from_pdf(temp_file_path)
-            valid_format = any("Question#" in page and "Answer#" in page for page in teacher_text)
-            
-            if not valid_format:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Assignment PDF is not in the correct format. It must contain 'Question#' and 'Answer#'."
-                )
-
-            # Delete old PDF from S3
-            if assignment.question_pdf_url:
-                delete_success = delete_from_s3(assignment.question_pdf_url)
-                if not delete_success:
-                    print(f"Failed to delete old PDF: {assignment.question_pdf_url}")
-
-            # Upload new PDF to S3
-            safe_course_name = sanitize_folder_name(course.name)
-            pdf_url = upload_to_s3(
-                folder_name=f"course_assignments/{current_teacher.id}/{safe_course_name}",
-                file_name=question_pdf.filename,
-                file_path=temp_file_path
-            )
-
-            if not pdf_url:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to upload question PDF"
-                )
-
-            # Update assignment PDF URL
-            assignment.question_pdf_url = pdf_url
-
-            # Cleanup temporary file
-            os.unlink(temp_file_path)
-
-        except Exception as e:
-            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to process PDF: {str(e)}"
-            )
-
-    # Update other fields
-    if deadline:
+    
+    # Update basic assignment information if provided
+    if name is not None:
+        assignment.name = name
+    
+    if description is not None:
+        assignment.description = description
+    
+    if deadline is not None:
         try:
             deadline_dt = datetime.strptime(deadline, "%Y-%m-%d %H:%M")
             assignment.deadline = deadline_dt
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid deadline format. Use YYYY-MM-DD HH:MM"
+                detail="Invalid deadline format. Use 'YYYY-MM-DD HH:MM'."
             )
-
-    if name:
-        assignment.name = name
-
-    if description:
-        assignment.description = description
-
+    
     if grade is not None:
-        if grade > 0:
-            assignment.grade = grade
-        else:
+        assignment.grade = grade
+    
+    # Handle question PDF update if provided
+    if question_pdf:
+        # Validate PDF
+        if question_pdf.content_type != 'application/pdf':
             raise HTTPException(
                 status_code=400,
-                detail="Grade must be a positive integer"
+                detail="Question file must be a PDF"
             )
-
+        
+        temp_file_path = None
+        try:
+            # Save uploaded PDF to temp file
+            with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                content = await question_pdf.read()
+                temp_file.write(content)
+                temp_file_path = temp_file.name
+            
+            # Validate the format of the question PDF
+            extractor = PDFQuestionAnswerExtractor(
+                pdf_files=[temp_file_path],
+                course_id=course_id,
+                assignment_id=assignment_id,
+                is_teacher=True
+            )
+            teacher_text = extractor.extract_text_from_pdf(temp_file_path)
+            parsed_dict = extractor.parse_qa(teacher_text)
+            
+            if not parsed_dict:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Assignment PDF is not in the correct format. It must contain 'Question#' and 'Answer#'."
+                )
+            
+            # Delete old PDF from S3 if it exists
+            if assignment.question_pdf_url:
+                delete_success = delete_from_s3(assignment.question_pdf_url)
+                if not delete_success:
+                    print(f"Warning: Failed to delete old PDF from S3: {assignment.question_pdf_url}")
+            
+            # Upload new PDF to S3
+            safe_course_name = sanitize_folder_name(course.name)
+            s3_url = upload_to_s3(
+                folder_name=f"course_assignments/{current_teacher.id}/{safe_course_name}",
+                file_name=f"{assignment_id}_{question_pdf.filename}",
+                file_path=temp_file_path
+            )
+            
+            if not s3_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to upload question PDF"
+                )
+            
+            # Update assignment with new PDF URL
+            assignment.question_pdf_url = s3_url
+            
+        finally:
+            # Clean up temp file
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+    
+    # Commit changes to database
     try:
         db.commit()
         db.refresh(assignment)
-
-        return {
-            "success": True,
-            "status": 200,
-            "message": "Assignment updated successfully",
-            "assignment": {
-                "id": assignment.id,
-                "name": assignment.name,
-                "description": assignment.description,
-                "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M") if assignment.deadline else None,
-                "grade": assignment.grade,
-                "question_pdf_url": assignment.question_pdf_url,
-                "course_id": assignment.course_id,
-                "created_at": assignment.created_at
-            }
-        }
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to update assignment: {str(e)}"
         )
+    
+    # Return updated assignment
+    return {
+        "success": True,
+        "status": 200,
+        "message": "Assignment updated successfully",
+        "assignment": {
+            "id": assignment.id,
+            "name": assignment.name,
+            "description": assignment.description,
+            "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M"),
+            "grade": assignment.grade,
+            "question_pdf_url": assignment.question_pdf_url
+        }
+    }
+
+
 
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
 async def get_assignment(
