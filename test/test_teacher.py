@@ -219,6 +219,53 @@ def test_create_assignment(course_id):
                 if hasattr(file_tuple[1], 'close'):
                     file_tuple[1].close()
 
+def test_update_assignment():
+    token = get_teacher_token()
+    if not token:
+        print("Failed to get teacher authorization token")
+        return
+
+    # Course and assignment IDs to update
+    course_id = 5  # Replace with actual course ID
+    assignment_id = 1  # Replace with actual assignment ID
+
+    # Data to update the assignment
+    form_data = {
+        "name": "Updated Assignment Name",
+        "description": "This is an updated assignment description.",
+        "deadline": "2023-12-31 23:59",
+        "grade": 100
+    }
+
+    # Optional: Include a new PDF file
+    files = []
+    pdf_path = Path("/home/myra/Downloads/teacher-assignment.pdf")  # Replace with actual PDF path
+    if pdf_path.exists():
+        files.append(("question_pdf", (pdf_path.name, open(pdf_path, "rb"), "application/pdf")))
+
+    try:
+        # Send the request
+        response = requests.put(
+            f"{BASE_URL}/teacher/course/{course_id}/assignment/{assignment_id}",
+            data=form_data,
+            files=files if files else None,
+            headers={
+                'Authorization': f'Bearer {token}',
+                'accept': 'application/json'
+            }
+        )
+        
+        # Close any open files
+        for _, file_tuple in files:
+            if hasattr(file_tuple[1], 'close'):
+                file_tuple[1].close()
+        
+        print("Update Assignment Status:", response.status_code)
+        print("Response:", json.dumps(response.json(), indent=2))
+        return response.json()
+    except Exception as e:
+        print("Error updating assignment:", str(e))
+        return None
 
 def test_update_course_request(course_id, request_id):
     token = get_teacher_token()
@@ -296,9 +343,10 @@ if __name__ == "__main__":
     # course_id = test_create_course()
     #print("Testing Course Updation:")
     # test_update_course()
-    test_delete_course()
+    # test_delete_course()
     # print("\nTesting Assignment Creation:")
     # assignment_id = test_create_assignment(1)
+    test_update_assignment()
         
         # print("\nTesting Course Request Update:")
         # # Assuming request_id 1 exists
