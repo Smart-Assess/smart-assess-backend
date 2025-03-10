@@ -1,5 +1,7 @@
 # test_teacher.py
 import requests
+import json
+
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -70,6 +72,84 @@ def test_create_course():
         print(f"Error creating course: {str(e)}")
         return None
 
+def test_update_course():
+    token = get_teacher_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+
+    # Assume an existing course has been created and we have its course_id.
+    course_id = 5  # Replace with a valid course ID for testing
+
+    # Form data for the update
+    form_data = {
+        "name": "Updated Course Name",
+        "batch": "2024",
+        "group": "B",
+        "section": "2",
+        "status": "active",
+        "removed_pdfs": json.dumps(["https://smartassessfyp.s3.us-east-1.amazonaws.com/course_pdfs/34/testcourse_m/sre Notes.pdf"])
+    }
+
+    # Files to upload (if any)
+    files = []
+    
+    # Add PDFs to upload if they exist
+    pdf_path = Path("/home/myra/Downloads/Defect-Management.pdf")
+    if pdf_path.exists():
+        files.append(("pdfs", (pdf_path.name, open(pdf_path, "rb"), "application/pdf")))
+
+    try:
+        # Send the request using multipart/form-data
+        response = requests.put(
+            f"{BASE_URL}/teacher/course/{course_id}",
+            data=form_data,
+            files=files if files else None,
+            headers={
+                'Authorization': f'Bearer {token}',
+                'accept': 'application/json'
+                # Don't set Content-Type when using files - requests will set it
+            }
+        )
+        
+        # Close the files
+        for _, file_tuple in files:
+            if hasattr(file_tuple[1], 'close'):
+                file_tuple[1].close()
+        
+        print("Update Course Status:", response.status_code)
+        print("Response:", json.dumps(response.json(), indent=2))
+        return response.json()
+    except Exception as e:
+        print("Error updating course:", str(e))
+        return None
+
+def test_delete_course():
+    token = get_teacher_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+
+    # Assume an existing course has been created and we have its course_id.
+    course_id = 4  # Replace with a valid course ID for testing
+
+    try:
+        # Send the delete request
+        response = requests.delete(
+            f"{BASE_URL}/teacher/course/{course_id}",
+            headers={
+                'Authorization': f'Bearer {token}',
+                'accept': 'application/json'
+            }
+        )
+        
+        print("Delete Course Status:", response.status_code)
+        print("Response:", json.dumps(response.json(), indent=2))
+        return response.json()
+    except Exception as e:
+        print("Error deleting course:", str(e))
+        return None
+    
 def test_create_assignment(course_id):
     if not course_id:
         print("No course ID provided")
@@ -213,8 +293,10 @@ if __name__ == "__main__":
     # print("Testing Assingment Evalution:")
     # test_evaluate_submissions()
     # print("Testing Course Creation:")
-    course_id = test_create_course()
-    
+    # course_id = test_create_course()
+    #print("Testing Course Updation:")
+    # test_update_course()
+    test_delete_course()
     # print("\nTesting Assignment Creation:")
     # assignment_id = test_create_assignment(1)
         
