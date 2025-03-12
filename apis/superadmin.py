@@ -58,8 +58,10 @@ async def add_university(
 
     image_url = None
     if image:
-        image_path = f"/tmp/{image.filename}"
+        # image_path = f"/tmp/{image.filename}"
+        image_path = os.path.join("temp", image.filename)
         with open(image_path, "wb") as buffer:
+            os.makedirs("temp", exist_ok=True)
             buffer.write(await image.read())
         image_url = upload_to_s3(
             folder_name="university_images", file_name=image.filename, file_path=image_path
@@ -241,72 +243,69 @@ async def update_university(
     city: Optional[str] = Form(None),
     state: Optional[str] = Form(None),
     zipcode: Optional[str] = Form(None),
+    admin_name: Optional[str] = Form(None),
+    admin_email: Optional[str] = Form(None),
+    admin_password: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_admin: SuperAdmin = Depends(get_current_admin)
     ):
-    # Check if university exists and belongs to the current admin
+    # Check if university exists
     university = db.query(University).filter(
         University.id == university_id,
         University.super_admin_id == current_admin.id
     ).first()
 
     if not university:
-        raise HTTPException(
-            status_code=404,
-            detail="University not found or access denied"
-        )
+        raise HTTPException(status_code=404, detail="University not found or access denied")
 
     # Check if email is taken by another university
-    if university_email:
+    if university_email and university_email != university.email:
         existing_university = db.query(University).filter(
             University.email == university_email,
             University.id != university_id
         ).first()
-
         if existing_university:
-            raise HTTPException(
-                status_code=400,
-                detail="Email already taken by another university"
-            )
+            raise HTTPException(status_code=400, detail="Email already taken by another university")
+
+    # Fetch associated university admin
+    university_admin = db.query(UniversityAdmin).filter(
+        UniversityAdmin.university_id == university.id
+    ).first()
+
+    if not university_admin:
+        raise HTTPException(status_code=404, detail="University admin not found")
+
+    # Check if admin email is taken
+    if admin_email and admin_email != university_admin.email:
+        existing_admin = db.query(UniversityAdmin).filter(
+            UniversityAdmin.email == admin_email,
+            UniversityAdmin.id != university_admin.id
+        ).first()
+        if existing_admin:
+            raise HTTPException(status_code=400, detail="Email already taken by another admin")
 
     # Handle image upload if provided
     if image:
         try:
-            # Delete the old image if it exists
             if university.image_url:
                 delete_success = delete_from_s3(university.image_url)
                 if not delete_success:
                     print(f"Failed to delete old image: {university.image_url}")
 
-            # Save the new image to a temporary file
             image_path = f"/tmp/{image.filename}"
             with open(image_path, "wb") as buffer:
                 buffer.write(await image.read())
 
-            # Upload the new image to S3
-            image_url = upload_to_s3(
-                folder_name="university_images",
-                file_name=image.filename,
-                file_path=image_path
-            )
+            image_url = upload_to_s3("university_images", image.filename, image_path)
             if not image_url:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to upload university image"
-                )
+                raise HTTPException(status_code=500, detail="Failed to upload university image")
 
-            # Clean up the temporary file
             os.remove(image_path)
-
-            # Update the university's image URL
             university.image_url = image_url
         except Exception as e:
             print(f"Error handling image upload: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail="An error occurred while processing the image"
-            )
+            raise HTTPException(status_code=500, detail="An error occurred while processing the image")
 
     # Update university fields if provided
     if university_name:
@@ -324,10 +323,18 @@ async def update_university(
     if zipcode:
         university.zipcode = zipcode
 
-    # Commit changes to the database
+    # Update university admin fields if provided
+    if admin_name:
+        university_admin.name = admin_name
+    if admin_email:
+        university_admin.email = admin_email
+    if admin_password:
+        university_admin.password = get_password_hash(admin_password)
+
     db.commit()
     send_email(university_email,university_name,university.admin_password,"admin")
     db.refresh(university)
+    db.refresh(university_admin)
 
     return {
         "success": True,
@@ -342,5 +349,10 @@ async def update_university(
             "state": university.state,
             "zipcode": university.zipcode,
             "image_url": university.image_url
+        },
+        "admin": {
+            "id": university_admin.id,
+            "name": university_admin.name,
+            "email": university_admin.email
         }
     }

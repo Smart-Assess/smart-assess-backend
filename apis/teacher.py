@@ -1,6 +1,7 @@
 # >> Import necessary modules and packages from FastAPI and other libraries
 import json
 import re
+from pydantic import BaseModel
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 from evaluations.assignment_evaluator import AssignmentEvaluator
@@ -24,7 +25,8 @@ from utils.s3 import delete_from_s3, download_from_s3, upload_to_s3
 # from utils.security import get_password_hash
 from bson import ObjectId
 import json
-
+from fastapi import Body
+from evaluations.base_extractor import PDFQuestionAnswerExtractor   
 from fastapi import APIRouter, UploadFile, Form, File, HTTPException, Depends
 from utils.converter import convert_ppt_to_pdf
 
@@ -270,87 +272,138 @@ async def get_teacher_courses(
         "has_next": (offset + limit) < total
     }
 
+class CourseUpdateRequest(BaseModel):
+    removed_pdfs: Optional[List[str]] = None
+    name: Optional[str] = None
+    batch: Optional[str] = None
+    group: Optional[str] = None
+    section: Optional[str] = None
+    status: Optional[str] = None
 
 @router.put("/teacher/course/{course_id}", response_model=dict)
 async def update_course(
     course_id: int,
-    name: str = None,
-    batch: str = None,
-    group: str = None,
-    section: str = None,
-    status: str = None,
-    pdfs: Optional[List[UploadFile]] = None,
-    removed_pdfs: str = None,
+    name: Optional[str] = Form(None),
+    batch: Optional[str] = Form(None),
+    group: Optional[str] = Form(None),
+    section: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
+    removed_pdfs: Optional[str] = Form(None),  # JSON string of URLs to remove
+    pdfs: List[UploadFile] = File([]),  # Default to empty list for optional files
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
 ):
+    """
+    Update a course with optional fields:
+    - course information (name, batch, group, section, status)
+    - new PDF materials to upload
+    - existing PDF materials to remove
+    
+    All fields are optional except course_id.
+    """
+    # Find the course to update
     course = db.query(Course).filter(
         Course.id == course_id,
         Course.teacher_id == current_teacher.id
     ).first()
-    
+
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-
-    # Update fields only if non-empty strings provided
-    if name is not None and name.strip(): course.name = name
-    if batch is not None and batch.strip(): course.batch = batch 
-    if group is not None and group.strip(): course.group = group
-    if section is not None and section.strip(): course.section = section
-    if status is not None and status.strip(): course.status = status
+    
+    # Update basic course information if provided
+    if name is not None: 
+        course.name = name.strip()
+    if batch is not None: 
+        course.batch = batch.strip()
+    if group is not None: 
+        course.group = group.strip()
+    if section is not None: 
+        course.section = section.strip()
+    if status is not None: 
+        course.status = status.strip()
 
     try:
-        # Handle PDF uploads if files provided
+        # Initialize PDF management variables
+        existing_urls = json.loads(course.pdf_urls) if course.pdf_urls else []
+        rag = get_teacher_rag(course.collection_name)
+        updated_urls = existing_urls.copy()  # Start with existing PDFs
+        
+        # 1. Handle removal of PDFs if requested
+        if removed_pdfs:
+            # Parse the JSON string to get the list of URLs to remove
+            removed_pdf_urls = json.loads(removed_pdfs)
+            
+            for url in removed_pdf_urls:
+                if url in updated_urls:
+                    # Try to delete from S3
+                    if delete_from_s3(url):
+                        try:
+                            # Try to delete from RAG embeddings
+                            rag.delete_pdf_embeddings(url)
+                        except Exception as e:
+                            print(f"Warning: Failed to delete embeddings for {url}: {e}")
+                        # Remove from our list whether or not embeddings deletion worked
+                        updated_urls.remove(url)
+                    else:
+                        # S3 deletion failed, log but don't halt execution
+                        print(f"Warning: Failed to delete PDF from S3: {url}")
+        
+        # 2. Handle new PDF uploads
         if pdfs:
-            existing_urls = json.loads(course.pdf_urls)
-            rag = get_teacher_rag(course.collection_name)
-            folder_name = f"course_pdfs/{current_teacher.id}/{course.name}"
+            folder_name = f"course_pdfs/{current_teacher.id}"
             
             for pdf in pdfs:
-                if not pdf.filename:
+                if not pdf.filename:  # Skip empty files
                     continue
                     
+                # Validate the PDF file
                 if not pdf.content_type == 'application/pdf':
-                    raise HTTPException(status_code=400, detail="File must be PDF")
-                    
-                with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-                    os.makedirs("temp", exist_ok=True)
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"File {pdf.filename} must be a PDF"
+                    )
+                
+                # Save to temporary file
+                temp_file = NamedTemporaryFile(delete=False, suffix=".pdf")
+                try:
+                    # Write contents to temp file
                     content = await pdf.read()
                     temp_file.write(content)
-                    temp_file_path = temp_file.name
-
-                try:
+                    temp_file.close()
+                    
+                    # Upload to S3
+                    s3_key = f"{course.id}_{pdf.filename}"
                     pdf_url = upload_to_s3(
                         folder_name=folder_name,
-                        file_name=pdf.filename,
-                        file_path=temp_file_path
+                        file_name=s3_key,
+                        file_path=temp_file.name
                     )
-                    if pdf_url:
-                        rag.store_pdf_embeddings(temp_file_path, pdf_url)
-                        existing_urls.append(pdf_url)
-                finally:
-                    os.unlink(temp_file_path)
                     
-            course.pdf_urls = json.dumps(existing_urls)
-
-        # Handle PDF removals if URLs provided
-        if removed_pdfs is not None and removed_pdfs.strip():
-            try:
-                removed_urls = json.loads(removed_pdfs)
-                existing_urls = json.loads(course.pdf_urls)
-                rag = get_teacher_rag(course.collection_name)
-                
-                for url in removed_urls:
-                    if url in existing_urls:
-                        if delete_from_s3(url):
-                            rag.delete_pdf_embeddings(url)
-                            existing_urls.remove(url)
-                            
-                course.pdf_urls = json.dumps(existing_urls)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid removed_pdfs format")
-
+                    if pdf_url:
+                        # Add to embeddings and URL list
+                        try:
+                            rag.store_pdf_embeddings(temp_file.name, pdf_url)
+                        except Exception as e:
+                            print(f"Warning: Failed to store embeddings for {pdf_url}: {e}")
+                        updated_urls.append(pdf_url)
+                    else:
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to upload PDF {pdf.filename}"
+                        )
+                finally:
+                    # Clean up the temp file
+                    if os.path.exists(temp_file.name):
+                        os.remove(temp_file.name)
+        
+        # 3. Update the course with new PDF URLs
+        course.pdf_urls = json.dumps(updated_urls)
+        
+        # 4. Commit changes to database
         db.commit()
+        db.refresh(course)
+        
+        # 5. Return success response
         return {
             "success": True,
             "status": 200,
@@ -366,9 +419,82 @@ async def update_course(
                 "pdf_urls": json.loads(course.pdf_urls)
             }
         }
+        
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error updating course: {str(e)}")
+@router.delete("/teacher/course/{course_id}", response_model=dict)
+async def delete_course(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin),
+):
+    """
+    Delete a course and all its associated resources:
+    - Course record in database
+    - PDF files in S3 bucket
+    - RAG embeddings
+
+    Returns:
+        dict: Response with success status and message
+    """
+    # Find the course to delete
+    course = db.query(Course).filter(
+        Course.id == course_id,
+        Course.teacher_id == current_teacher.id
+    ).first()
+
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    try:
+        # 1. Delete PDF files from S3
+        pdf_urls = json.loads(course.pdf_urls) if course.pdf_urls else []
+        deleted_files = []
+        failed_files = []
+        
+        for url in pdf_urls:
+            if delete_from_s3(url):
+                deleted_files.append(url)
+            else:
+                failed_files.append(url)
+
+        # 2. Delete RAG embeddings associated with the course
+        try:
+            rag = get_teacher_rag(course.collection_name)
+            # Delete all embeddings associated with this course
+            for url in pdf_urls:
+                try:
+                    rag.delete_pdf_embeddings(url)
+                except Exception as e:
+                    print(f"Warning: Failed to delete embeddings for {url}: {e}")
+        except Exception as e:
+            print(f"Warning: Failed to delete RAG collection: {e}")
+
+        # 3. Delete assignments associated with this course
+        assignments = db.query(Assignment).filter(Assignment.course_id == course_id).all()
+        for assignment in assignments:
+            db.delete(assignment)
+
+        # 4. Delete the course record from the database
+        db.delete(course)
+        db.commit()
+
+        # 5. Return success response with details
+        return {
+            "success": True,
+            "status": 200,
+            "message": "Course deleted successfully",
+            "details": {
+                "course_id": course_id,
+                "deleted_files": deleted_files,
+                "failed_files": failed_files
+            }
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting course: {str(e)}")
 
 @router.get("/teacher/assignments", response_model=dict)
 async def get_teacher_assignments(
@@ -508,11 +634,20 @@ async def create_assignment(
         # Validate the format of the question PDF
         extractor = PDFQuestionAnswerExtractor(
             pdf_files=[temp_file_path],
+            course_id = course_id,
+            assignment_id = 0,
+            is_teacher = True
         )
         teacher_text = extractor.extract_text_from_pdf(temp_file_path)
-        valid_format = any("Question#" in page and "Answer#" in page for page in teacher_text)
+        print(teacher_text)
+        # for page in teacher_text:
+        #     print("Page:::",page)
+        parsed_dict= extractor.parse_qa(teacher_text)
+        # valid_format = any("Question#" in teacher_text and "Answer#" in teacher_text)
+        print("parsed_dict: ",parsed_dict)
         
-        if not valid_format:
+        
+        if not parsed_dict:
             raise HTTPException(
                 status_code=400,
                 detail="Assignment PDF is not in the correct format. It must contain 'Question#' and 'Answer#'."
@@ -566,150 +701,153 @@ async def create_assignment(
 async def update_assignment(
     course_id: int,
     assignment_id: int,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
-    deadline: Optional[str] = None, # YYYY-MM-DD HH:MM
-    grade: Optional[int] = None,
+    name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    deadline: Optional[str] = Form(None),  # Format: "YYYY-MM-DD HH:MM"
+    grade: Optional[int] = Form(None),
     question_pdf: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin)
 ):
-    # Verify course and assignment ownership
+    """
+    Update an assignment with optional fields:
+    - Basic information (name, description, deadline, grade)
+    - Question PDF file
+    
+    All fields are optional except course_id and assignment_id.
+    """
+    # First, verify course exists and belongs to the teacher
     course = db.query(Course).filter(
         Course.id == course_id,
         Course.teacher_id == current_teacher.id
     ).first()
-
+    
     if not course:
         raise HTTPException(
             status_code=404,
             detail="Course not found or you don't have access"
         )
-
+    
+    # Find the assignment
     assignment = db.query(Assignment).filter(
         Assignment.id == assignment_id,
         Assignment.course_id == course_id
     ).first()
-
+    
     if not assignment:
         raise HTTPException(
             status_code=404,
             detail="Assignment not found"
         )
-
-    # Handle PDF update if provided
-    if question_pdf and not isinstance(question_pdf, str):
-        if question_pdf.content_type != 'application/pdf':
-            raise HTTPException(
-                status_code=400,
-                detail="Question file must be a PDF"
-            )
-
-        try:
-            # Create temporary file for PDF extraction
-            with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-                content = await question_pdf.read()
-                temp_file.write(content)
-                temp_file_path = temp_file.name
-
-            # Validate the format of the question PDF
-            extractor = PDFQuestionAnswerExtractor(
-                pdf_files=[temp_file_path]
-            )
-            teacher_text = extractor.extract_text_from_pdf(temp_file_path)
-            valid_format = any("Question#" in page and "Answer#" in page for page in teacher_text)
-            
-            if not valid_format:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Assignment PDF is not in the correct format. It must contain 'Question#' and 'Answer#'."
-                )
-
-            # Delete old PDF from S3
-            if assignment.question_pdf_url:
-                delete_success = delete_from_s3(assignment.question_pdf_url)
-                if not delete_success:
-                    print(f"Failed to delete old PDF: {assignment.question_pdf_url}")
-
-            # Upload new PDF to S3
-            safe_course_name = sanitize_folder_name(course.name)
-            pdf_url = upload_to_s3(
-                folder_name=f"course_assignments/{current_teacher.id}/{safe_course_name}",
-                file_name=question_pdf.filename,
-                file_path=temp_file_path
-            )
-
-            if not pdf_url:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to upload question PDF"
-                )
-
-            # Update assignment PDF URL
-            assignment.question_pdf_url = pdf_url
-
-            # Cleanup temporary file
-            os.unlink(temp_file_path)
-
-        except Exception as e:
-            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to process PDF: {str(e)}"
-            )
-
-    # Update other fields
-    if deadline:
+    
+    # Update basic assignment information if provided
+    if name is not None:
+        assignment.name = name
+    
+    if description is not None:
+        assignment.description = description
+    
+    if deadline is not None:
         try:
             deadline_dt = datetime.strptime(deadline, "%Y-%m-%d %H:%M")
             assignment.deadline = deadline_dt
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid deadline format. Use YYYY-MM-DD HH:MM"
+                detail="Invalid deadline format. Use 'YYYY-MM-DD HH:MM'."
             )
-
-    if name:
-        assignment.name = name
-
-    if description:
-        assignment.description = description
-
+    
     if grade is not None:
-        if grade > 0:
-            assignment.grade = grade
-        else:
+        assignment.grade = grade
+    
+    # Handle question PDF update if provided
+    if question_pdf:
+        # Validate PDF
+        if question_pdf.content_type != 'application/pdf':
             raise HTTPException(
                 status_code=400,
-                detail="Grade must be a positive integer"
+                detail="Question file must be a PDF"
             )
-
+        
+        temp_file_path = None
+        try:
+            # Save uploaded PDF to temp file
+            with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                content = await question_pdf.read()
+                temp_file.write(content)
+                temp_file_path = temp_file.name
+            
+            # Validate the format of the question PDF
+            extractor = PDFQuestionAnswerExtractor(
+                pdf_files=[temp_file_path],
+                course_id=course_id,
+                assignment_id=assignment_id,
+                is_teacher=True
+            )
+            teacher_text = extractor.extract_text_from_pdf(temp_file_path)
+            parsed_dict = extractor.parse_qa(teacher_text)
+            
+            if not parsed_dict:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Assignment PDF is not in the correct format. It must contain 'Question#' and 'Answer#'."
+                )
+            
+            # Delete old PDF from S3 if it exists
+            if assignment.question_pdf_url:
+                delete_success = delete_from_s3(assignment.question_pdf_url)
+                if not delete_success:
+                    print(f"Warning: Failed to delete old PDF from S3: {assignment.question_pdf_url}")
+            
+            # Upload new PDF to S3
+            safe_course_name = sanitize_folder_name(course.name)
+            s3_url = upload_to_s3(
+                folder_name=f"course_assignments/{current_teacher.id}/{safe_course_name}",
+                file_name=f"{assignment_id}_{question_pdf.filename}",
+                file_path=temp_file_path
+            )
+            
+            if not s3_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to upload question PDF"
+                )
+            
+            # Update assignment with new PDF URL
+            assignment.question_pdf_url = s3_url
+            
+        finally:
+            # Clean up temp file
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+    
+    # Commit changes to database
     try:
         db.commit()
         db.refresh(assignment)
-
-        return {
-            "success": True,
-            "status": 200,
-            "message": "Assignment updated successfully",
-            "assignment": {
-                "id": assignment.id,
-                "name": assignment.name,
-                "description": assignment.description,
-                "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M") if assignment.deadline else None,
-                "grade": assignment.grade,
-                "question_pdf_url": assignment.question_pdf_url,
-                "course_id": assignment.course_id,
-                "created_at": assignment.created_at
-            }
-        }
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to update assignment: {str(e)}"
         )
+    
+    # Return updated assignment
+    return {
+        "success": True,
+        "status": 200,
+        "message": "Assignment updated successfully",
+        "assignment": {
+            "id": assignment.id,
+            "name": assignment.name,
+            "description": assignment.description,
+            "deadline": assignment.deadline.strftime("%Y-%m-%d %H:%M"),
+            "grade": assignment.grade,
+            "question_pdf_url": assignment.question_pdf_url
+        }
+    }
+
+
 
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
 async def get_assignment(
