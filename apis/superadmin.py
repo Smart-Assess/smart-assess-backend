@@ -55,8 +55,10 @@ async def add_university(
 
     image_url = None
     if image:
-        image_path = f"/tmp/{image.filename}"
+        # image_path = f"/tmp/{image.filename}"
+        image_path = os.path.join("temp", image.filename)
         with open(image_path, "wb") as buffer:
+            os.makedirs("temp", exist_ok=True)
             buffer.write(await image.read())
         image_url = upload_to_s3(
             folder_name="university_images", file_name=image.filename, file_path=image_path
