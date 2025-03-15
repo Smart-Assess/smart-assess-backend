@@ -17,6 +17,9 @@ from typing import Optional
 
 from utils.s3 import upload_to_s3, delete_from_s3
 from utils.security import get_password_hash
+
+from fastapi import HTTPException
+from utils.smtp import send_email  
 import os
 
 router = APIRouter()
@@ -71,7 +74,7 @@ async def add_student(
         password=get_password_hash(password),  # Hash the password
         university_id=current_admin.university_id,  # Set university_id from the admin's associated university
     )
-
+    send_email(email,"",password,"student")
     # Add the new student to the session and commit
     db.add(new_student)
     db.commit()
@@ -259,6 +262,7 @@ async def update_student(
             )
 
     db.commit()
+    send_email(student.email,"",student.password,"student")
     db.refresh(student)
 
     return {
@@ -322,6 +326,7 @@ async def add_teacher(
         image_url=image_url,
         university_id=current_admin.university_id,
     )
+    send_email(email,"",password,"teacher")
 
     db.add(new_teacher)
     db.commit()
@@ -455,6 +460,7 @@ async def update_teacher(
             )
 
     db.commit()
+    send_email(teacher.email,"",teacher.password,"teacher")
     db.refresh(teacher)
 
     return {
