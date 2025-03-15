@@ -10,7 +10,7 @@ BASE_URL = "http://127.0.0.1:8000"
 def get_teacher_token():
     login_data = {
         'grant_type': 'password',
-        'username': 't@gmail.com',  # Teacher email
+        'username': '21b-146-se@students.uit.edu',  # Teacher email
         'password': '12345',
         'scope': '',
         'client_id': '',
@@ -79,7 +79,7 @@ def test_update_course():
         return
 
     # Assume an existing course has been created and we have its course_id.
-    course_id = 5  # Replace with a valid course ID for testing
+    course_id = 35  # Replace with a valid course ID for testing
 
     # Form data for the update
     form_data = {
@@ -88,16 +88,20 @@ def test_update_course():
         "group": "B",
         "section": "2",
         "status": "active",
-        "removed_pdfs": json.dumps(["https://smartassessfyp.s3.us-east-1.amazonaws.com/course_pdfs/34/testcourse_m/sre Notes.pdf"])
+        # "removed_pdfs": json.dumps(["https://smartassessfyp.s3.us-east-1.amazonaws.com/course_pdfs/68/35_sre Notes (1).pdf"])
+        
     }
 
     # Files to upload (if any)
     files = []
     
+    pdf_paths = ["/home/myra/Downloads/sre Notes.pdf"]
+    # pdf_paths= []
     # Add PDFs to upload if they exist
-    pdf_path = Path("/home/myra/Downloads/Defect-Management.pdf")
-    if pdf_path.exists():
-        files.append(("pdfs", (pdf_path.name, open(pdf_path, "rb"), "application/pdf")))
+    for pdf_path in pdf_paths:
+        pdf_path = Path(pdf_path)
+        if pdf_path.exists():
+            files.append(("pdfs", (pdf_path.name, open(pdf_path, "rb"), "application/pdf")))
 
     try:
         # Send the request using multipart/form-data
@@ -165,7 +169,7 @@ def test_create_assignment(course_id):
     
     try:
         # Verify PDF exists
-        pdf_path = '/home/myra/Downloads/Software-metrics.pdf'
+        pdf_path = '/home/myra/Downloads/teacher.pdf'
         if not Path(pdf_path).exists():
             print(f"PDF not found at {pdf_path}")
             return
@@ -355,6 +359,197 @@ def test_update_course_request(course_id, request_id):
     except Exception as e:
         print(f"Error updating request: {str(e)}")
 
+def test_get_assignment_submissions():
+    """Test retrieving paginated student submissions for an assignment"""
+    token = get_teacher_token()
+    if not token:
+        print("Failed to get teacher authorization token")
+        return False
+    
+    # Test parameters
+    course_id = 5  # Replace with a valid course ID for testing
+    assignment_id = 1  # Replace with a valid assignment ID for testing
+    page = 1
+    limit = 10
+    
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'accept': 'application/json'
+    }
+    
+    try:
+        # Make the API request
+        response = requests.get(
+            f"{BASE_URL}/teacher/course/{course_id}/assignment/{assignment_id}/submissions?page={page}&limit={limit}",
+            headers=headers
+        )
+        
+        print("\n--- Testing Assignment Submissions Retrieval ---")
+        print(f"Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"Success: {result['success']}")
+            print(f"Total submissions: {result['total']}")
+            print(f"Current page: {result['page']} of {result['total_pages']}")
+            print(f"Has previous page: {result['has_previous']}")
+            print(f"Has next page: {result['has_next']}")
+            
+            # Display submissions information
+            submissions = result["submissions"]
+            print(f"\nFound {len(submissions)} submissions on this page:")
+            for i, submission in enumerate(submissions, 1):
+                student = submission["student"]
+                print(f"\n{i}. Submission ID: {submission['submission_id']}")
+                print(f"   Student: {student['name']} (ID: {student['student_id']})")
+                print(f"   Department: {student['department']}, Batch: {student['batch']}, Section: {student['section']}")
+                print(f"   Submitted at: {submission['submitted_at']}")
+                print(f"   PDF URL: {submission['pdf_url']}")
+            
+            # Test pagination by fetching the next page if available
+            if result["has_next"]:
+                print("\nTesting pagination - fetching next page...")
+                next_page = page + 1
+                
+                next_response = requests.get(
+                    f"{BASE_URL}/teacher/course/{course_id}/assignment/{assignment_id}/submissions?page={next_page}&limit={limit}",
+                    headers=headers
+                )
+                
+                if next_response.status_code == 200:
+                    next_result = next_response.json()
+                    print(f"Next page status: {next_response.status_code}")
+                    print(f"Next page submissions: {len(next_result['submissions'])}")
+                    
+                    # Verify that pages are different
+                    if len(submissions) > 0 and len(next_result['submissions']) > 0:
+                        first_submission_id = submissions[0]['submission_id'] if submissions else None
+                        next_first_submission_id = next_result['submissions'][0]['submission_id'] if next_result['submissions'] else None
+                        
+                        if first_submission_id != next_first_submission_id:
+                            print("Pagination verified: Different submissions on different pages")
+                        else:
+                            print("Warning: Same submission appears on consecutive pages")
+                else:
+                    print(f"Failed to fetch next page: {next_response.status_code}")
+                    print(next_response.text)
+            
+            # Test with different limit
+            print("\nTesting with different limit parameter...")
+            small_limit = 3
+            small_limit_response = requests.get(
+                f"{BASE_URL}/teacher/course/{course_id}/assignment/{assignment_id}/submissions?page=1&limit={small_limit}",
+                headers=headers
+            )
+            
+            if small_limit_response.status_code == 200:
+                small_limit_result = small_limit_response.json()
+                print(f"Status with limit={small_limit}: {small_limit_response.status_code}")
+                print(f"Submissions returned: {len(small_limit_result['submissions'])}")
+                
+                # Verify the limit works
+                assert len(small_limit_result['submissions']) <= small_limit, "Limit parameter not respected"
+                print(f"Limit parameter verified: returned {len(small_limit_result['submissions'])} submissions (limit was {small_limit})")
+            
+            return result
+        else:
+            print(f"Error: {response.status_code}")
+            print(response.text)
+            return False
+            
+    except Exception as e:
+        print(f"Error in test_get_assignment_submissions: {str(e)}")
+        return False
+def test_get_submission_details():
+    """Test retrieving detailed information for a specific submission"""
+    token = get_teacher_token()
+    if not token:
+        print("Failed to get teacher authorization token")
+        return False
+    
+    # Test parameters - replace with valid IDs from your test environment
+    course_id = 5
+    assignment_id = 1
+    submission_id = 1
+    
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'accept': 'application/json'
+    }
+    
+    try:
+        # Make the API request
+        response = requests.get(
+            f"{BASE_URL}/teacher/course/{course_id}/assignment/{assignment_id}/submission/{submission_id}",
+            headers=headers
+        )
+        
+        print("\n--- Testing Submission Details Retrieval ---")
+        print(f"Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"Success: {result['success']}")
+            
+            # Display submission data
+            submission = result.get('submission', {})
+            
+            # Display basic submission info
+            print("\nSubmission Details:")
+            print(f"Course ID: {submission.get('course_id')}")
+            print(f"Assignment ID: {submission.get('assignment_id')}")
+            print(f"Student ID: {submission.get('student_id')}")
+            print(f"PDF File: {submission.get('PDF_File', 'N/A')}")
+            
+            # Display evaluation data if available
+            if 'evaluation_data' in submission:
+                eval_data = submission.get('evaluation_data', {})
+                print("\nEvaluation Data:")
+                print(f"Score: {eval_data.get('score', 'N/A')}")
+                print(f"Evaluated At: {eval_data.get('evaluated_at', 'N/A')}")
+                
+                questions = eval_data.get('questions', [])
+                if questions:
+                    print(f"\nQuestions Evaluated: {len(questions)}")
+                    for i, q in enumerate(questions[:3], 1):  # Show first 3 questions for brevity
+                        print(f"\nQuestion {i}:")
+                        print(f"  Text: {q.get('question_text', '')[:50]}...")  # Show first 50 chars
+                        print(f"  Score: {q.get('score', 'N/A')}/{q.get('max_score', 'N/A')}")
+                        print(f"  Feedback: {q.get('feedback', '')[:50]}...")  # Show first 50 chars
+                    
+                    if len(questions) > 3:
+                        print(f"\n... and {len(questions) - 3} more questions")
+            
+            # Display answers if available
+            if 'answers' in submission:
+                answers = submission.get('answers', [])
+                print(f"\nAnswers Found: {len(answers)}")
+                for i, ans in enumerate(answers[:3], 1):  # Show first 3 answers for brevity
+                    print(f"\nAnswer {i}:")
+                    print(f"  Question: {ans.get('question_number', 'N/A')}")
+                    print(f"  Answer Text: {ans.get('answer_text', '')[:50]}...")  # Show first 50 chars
+                
+                if len(answers) > 3:
+                    print(f"\n... and {len(answers) - 3} more answers")
+            
+            # Test invalid submission ID
+            print("\nTesting invalid submission ID...")
+            invalid_response = requests.get(
+                f"{BASE_URL}/teacher/course/{course_id}/assignment/{assignment_id}/submission/99999",
+                headers=headers
+            )
+            print(f"Invalid submission ID status: {invalid_response.status_code}")
+            print(f"Response: {invalid_response.text}")
+            
+            return result
+        else:
+            print(f"Error: {response.status_code}")
+            print(response.text)
+            return False
+            
+    except Exception as e:
+        print(f"Error in test_get_submission_details: {str(e)}")
+        return False
 
 def test_evaluate_submissions():
     token = get_teacher_token()
@@ -362,9 +557,9 @@ def test_evaluate_submissions():
         print("Failed to get authorization token")
         return
 
-    course_id = 1  # Known course ID
-    assignment_id = 6  # Known assignment ID
-    submission_ids = [1]  # Test submission IDs
+    course_id = 5  # Known course ID
+    assignment_id = 1  # Known assignment ID
+    submission_ids = 1  # Test submission IDs
 
     test_cases = [
         {
@@ -410,8 +605,10 @@ if __name__ == "__main__":
     #print("Testing Course Updation:")
     # test_update_course()
     # test_delete_course()
-    # print("\nTesting Assignment Creation:")
-    # assignment_id = test_create_assignment(1)
+    print("\nTesting Assignment Creation:")
+    # assignment_id = test_create_assignment(35)
     # test_update_assignment()
     # test_regenerate_course_code()
-    test_update_course_request(5,1)
+    # test_update_course_request(35,2)
+    # test_get_assignment_submissions()
+    # test_get_submission_details()

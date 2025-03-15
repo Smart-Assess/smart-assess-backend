@@ -271,15 +271,6 @@ async def get_teacher_courses(
         "has_previous": page > 1,
         "has_next": (offset + limit) < total
     }
-
-class CourseUpdateRequest(BaseModel):
-    removed_pdfs: Optional[List[str]] = None
-    name: Optional[str] = None
-    batch: Optional[str] = None
-    group: Optional[str] = None
-    section: Optional[str] = None
-    status: Optional[str] = None
-
 @router.put("/teacher/course/{course_id}", response_model=dict)
 async def update_course(
     course_id: int,
@@ -301,7 +292,6 @@ async def update_course(
     
     All fields are optional except course_id.
     """
-    # Find the course to update
     course = db.query(Course).filter(
         Course.id == course_id,
         Course.teacher_id == current_teacher.id
@@ -310,7 +300,6 @@ async def update_course(
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     
-    # Update basic course information if provided
     if name is not None: 
         course.name = name.strip()
     if batch is not None: 
@@ -321,58 +310,54 @@ async def update_course(
         course.section = section.strip()
     if status is not None: 
         course.status = status.strip()
-
+    
     try:
-        # Initialize PDF management variables
         existing_urls = json.loads(course.pdf_urls) if course.pdf_urls else []
         rag = get_teacher_rag(course.collection_name)
-        updated_urls = existing_urls.copy()  # Start with existing PDFs
-        
-        # 1. Handle removal of PDFs if requested
+        updated_urls = existing_urls.copy()
+        existing_filenames = {url.split("/")[-1].split("_", 1)[-1] for url in existing_urls}
+        print(f"Existing Filenames: {existing_filenames}")
         if removed_pdfs:
-            # Parse the JSON string to get the list of URLs to remove
             removed_pdf_urls = json.loads(removed_pdfs)
-            
             for url in removed_pdf_urls:
                 if url in updated_urls:
-                    # Try to delete from S3
                     if delete_from_s3(url):
                         try:
-                            # Try to delete from RAG embeddings
                             rag.delete_pdf_embeddings(url)
                         except Exception as e:
                             print(f"Warning: Failed to delete embeddings for {url}: {e}")
-                        # Remove from our list whether or not embeddings deletion worked
                         updated_urls.remove(url)
                     else:
-                        # S3 deletion failed, log but don't halt execution
                         print(f"Warning: Failed to delete PDF from S3: {url}")
         
-        # 2. Handle new PDF uploads
         if pdfs:
             folder_name = f"course_pdfs/{current_teacher.id}"
             
             for pdf in pdfs:
-                if not pdf.filename:  # Skip empty files
-                    continue
-                    
-                # Validate the PDF file
-                if not pdf.content_type == 'application/pdf':
+                if not pdf.filename:
+                    continue  # Skip empty files
+                
+                if pdf.content_type != 'application/pdf':
                     raise HTTPException(
                         status_code=400, 
                         detail=f"File {pdf.filename} must be a PDF"
                     )
                 
-                # Save to temporary file
-                temp_file = NamedTemporaryFile(delete=False, suffix=".pdf")
+                original_filename, ext = os.path.splitext(pdf.filename.strip())
+                filename = f"{original_filename}{ext}"
+                counter = 1
+                
+                while filename in existing_filenames:
+                    filename = f"{original_filename} ({counter}){ext}"
+                    counter += 1
+                
+                temp_file = NamedTemporaryFile(delete=False, suffix=ext)
                 try:
-                    # Write contents to temp file
                     content = await pdf.read()
                     temp_file.write(content)
                     temp_file.close()
                     
-                    # Upload to S3
-                    s3_key = f"{course.id}_{pdf.filename}"
+                    s3_key = f"{course.id}_{filename}"
                     pdf_url = upload_to_s3(
                         folder_name=folder_name,
                         file_name=s3_key,
@@ -380,30 +365,25 @@ async def update_course(
                     )
                     
                     if pdf_url:
-                        # Add to embeddings and URL list
                         try:
                             rag.store_pdf_embeddings(temp_file.name, pdf_url)
                         except Exception as e:
                             print(f"Warning: Failed to store embeddings for {pdf_url}: {e}")
                         updated_urls.append(pdf_url)
+                        existing_filenames.add(filename)
                     else:
                         raise HTTPException(
                             status_code=500,
-                            detail=f"Failed to upload PDF {pdf.filename}"
+                            detail=f"Failed to upload PDF {filename}"
                         )
                 finally:
-                    # Clean up the temp file
                     if os.path.exists(temp_file.name):
                         os.remove(temp_file.name)
         
-        # 3. Update the course with new PDF URLs
         course.pdf_urls = json.dumps(updated_urls)
-        
-        # 4. Commit changes to database
         db.commit()
         db.refresh(course)
         
-        # 5. Return success response
         return {
             "success": True,
             "status": 200,
@@ -419,7 +399,7 @@ async def update_course(
                 "pdf_urls": json.loads(course.pdf_urls)
             }
         }
-        
+    
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error updating course: {str(e)}")
