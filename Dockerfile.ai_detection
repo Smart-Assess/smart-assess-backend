@@ -1,0 +1,25 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Set environment variables to improve pip performance
+ENV PIP_DEFAULT_TIMEOUT=300 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
+# Install git - required for pip install from git repositories
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+# Install web framework and dependencies
+RUN pip install fastapi uvicorn pydantic 
+
+# Install the generated_text_detector library with all dependencies
+RUN pip install git+https://github.com/superannotateai/generated_text_detector.git@v1.1.0
+
+# Copy the AI detection script into the container
+COPY ai_detection.py .
+
+EXPOSE 5000
+
+CMD ["uvicorn", "ai_detection:app", "--host", "0.0.0.0", "--port", "5000"]
