@@ -15,6 +15,9 @@ from typing import Optional
 
 from utils.s3 import upload_to_s3, delete_from_s3
 from utils.security import get_password_hash
+
+from fastapi import HTTPException
+from utils.smtp import send_email  
 import os
 router = APIRouter()
 
@@ -80,6 +83,7 @@ async def add_university(
         image_url=image_url,
         super_admin_id=current_admin.id,
     )
+    
     db.add(new_university)
     db.commit()
     db.refresh(new_university)
@@ -91,6 +95,8 @@ async def add_university(
         password=get_password_hash(admin_password),
         university_id=new_university.id,
     )
+
+    send_email(university_email,admin_email,admin_password,"admin")
     db.add(new_university_admin)
     db.commit()
 
@@ -325,6 +331,7 @@ async def update_university(
         university_admin.password = get_password_hash(admin_password)
 
     db.commit()
+    send_email(university_email,university_name,university.admin_password,"admin")
     db.refresh(university)
     db.refresh(university_admin)
 

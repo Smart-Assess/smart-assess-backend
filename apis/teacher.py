@@ -27,6 +27,9 @@ from bson import ObjectId
 import json
 from fastapi import Body
 from evaluations.base_extractor import PDFQuestionAnswerExtractor   
+from fastapi import APIRouter, UploadFile, Form, File, HTTPException, Depends
+from utils.converter import convert_ppt_to_pdf
+
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, ObjectId):
@@ -73,11 +76,10 @@ async def create_course(
     group: str = Form(...),
     section: str = Form(...),
     status: str = Form(...),
-    pdfs: List[UploadFile] = File(None),
+    files: List[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
 ):
-    # Step 1: Create the course without the PDF URLs
     collection_name = generate_collection_name(current_teacher.id, name)
     new_course = Course(
         name=name,
@@ -85,56 +87,56 @@ async def create_course(
         group=group,
         section=section,
         status=status,
-        pdf_urls=json.dumps([]),  # Temporary empty list
+        pdf_urls=json.dumps([]),
         teacher_id=current_teacher.id,
         collection_name=collection_name,
     )
+    
     db.add(new_course)
     db.commit()
-    db.refresh(new_course)  # Get the course ID after saving
+    db.refresh(new_course)
 
     rag = get_teacher_rag(collection_name)
     pdf_urls = []
 
-    # Step 2: Process the PDFs and upload them with course ID
-    if pdfs:
-        for pdf in pdfs:
-            if not pdf.content_type == 'application/pdf':
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"File {pdf.filename} must be a PDF"
-                )
+    if files:
+        temp_dir = "temp"
+        os.makedirs(temp_dir, exist_ok=True)
+
+        for file in files:
+            ext = file.filename.split('.')[-1].lower()
+            if ext not in ['pdf', 'ppt', 'pptx']:
+                raise HTTPException(status_code=400, detail=f"File {file.filename} must be a PDF or PPT")
+
+            file_path = os.path.join(temp_dir, file.filename)
+            with open(file_path, "wb") as buffer:
+                buffer.write(await file.read())
+
             
-            pdf_path = os.path.join("temp", pdf.filename)
-            try:
-                with open(pdf_path, "wb") as buffer:
-                    os.makedirs("temp", exist_ok=True)
-                    buffer.write(await pdf.read())
-                
-                # Include course ID in the folder or file name for uniqueness
-                pdf_url = upload_to_s3(
-                    folder_name=f"course_pdfs/{current_teacher.id}",
-                    file_name=f"{new_course.id}_{pdf.filename}",  # Add course ID to file name
-                    file_path=pdf_path
-                )
+            if ext in ["ppt", "pptx"]:
+                converted_pdf_path = convert_ppt_to_pdf(file_path)
+                os.remove(file_path)  
+                file_path = converted_pdf_path  
 
-                if pdf_url:
-                    try:
-                        rag.store_pdf_embeddings(pdf_path, pdf_url)
-                    except Exception as e:
-                        print(f"Failed to store embeddings: {e}")
-                        
-                    pdf_urls.append(pdf_url)
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Failed to upload PDF {pdf.filename}"
-                    )
-            finally:
-                if os.path.exists(pdf_path):
-                    os.remove(pdf_path)
+           
+            pdf_url = upload_to_s3(
+                folder_name=f"course_pdfs/{current_teacher.id}",
+                file_name=f"{new_course.id}_{os.path.basename(file_path)}",
+                file_path=file_path
+            )
 
-    # Step 3: Update the course record with the PDF URLs
+            if pdf_url:
+                try:
+                    rag.store_pdf_embeddings(file_path, pdf_url)
+                except Exception as e:
+                    print(f"Failed to store embeddings: {e}")
+
+                pdf_urls.append(pdf_url)
+            else:
+                raise HTTPException(status_code=500, detail=f"Failed to upload file {file.filename}")
+
+            os.remove(file_path)  # Clean up the temporary converted PDF
+
     new_course.pdf_urls = json.dumps(pdf_urls)
     db.commit()
     db.refresh(new_course)
