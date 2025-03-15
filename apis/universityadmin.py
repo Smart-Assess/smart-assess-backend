@@ -29,7 +29,6 @@ router = APIRouter()
 @router.post("/universityadmin/student", response_model=dict)
 async def add_student(
     full_name: str = Form(...),
-    student_id: str = Form(...),
     department: str = Form(...),
     email: str = Form(...),
     batch: str = Form(...),
@@ -47,6 +46,23 @@ async def add_student(
         raise HTTPException(
             status_code=400, detail="Student with this email already exists"
         )
+    
+    # Generate department code (first letter of each word)
+    dept_words = department.strip().split()
+    dept_code = ''.join([word[0].upper() for word in dept_words if word])
+    
+    # Generate a random 3-digit number
+    import random
+    random_digits = f"{random.randint(0, 999):03d}"
+    
+    # Create student_id in format: batchvalue-random3digits-department_code
+    student_id = f"{batch}-{random_digits}-{dept_code}"
+    
+    # Check if this student_id already exists, if so, regenerate
+    while db.query(Student).filter(Student.student_id == student_id).first():
+        random_digits = f"{random.randint(0, 999):03d}"
+        student_id = f"{batch}-{random_digits}-{dept_code}"
+    
     image_url = None
     if image:
         image_path = os.path.join("temp", image.filename)
@@ -84,8 +100,8 @@ async def add_student(
         "success": True,
         "status": 201,
         "student_id": new_student.id,
+        "generated_student_id": student_id,
     }
-
 
 @router.get("/universityadmin/students", response_model=dict)
 async def get_students(
@@ -211,24 +227,46 @@ async def update_student(
             raise HTTPException(
                 status_code=400, detail="Email already taken by another student"
             )
+        student.email = email
 
     if full_name:
         student.full_name = full_name
+        
+    should_regenerate_id = False
+    
     if department:
         student.department = department
-    if email:
-        student.email = email
+        should_regenerate_id = True
+        
     if batch:
         student.batch = batch
+        should_regenerate_id = True
+        
+    # Regenerate student_id if needed
+    if should_regenerate_id:
+        import random
+        
+        dept_words = student.department.strip().split()
+        dept_code = ''.join([word[0].upper() for word in dept_words if word])
+        
+        random_digits = f"{random.randint(0, 999):03d}"
+        
+        new_student_id = f"{student.batch}-{random_digits}-{dept_code}"
+        
+        while db.query(Student).filter(Student.student_id == new_student_id).first():
+            random_digits = f"{random.randint(0, 999):03d}"
+            new_student_id = f"{student.batch}-{random_digits}-{dept_code}"
+            
+        student.student_id = new_student_id
+    
     if section:
         student.section = section
+        
     if password:
         student.password = get_password_hash(password)
 
-    # Handle image upload if provided
     if image:
         try:
-            # Delete the old image if it exists
             if student.image_url:
                 delete_success = delete_from_s3(student.image_url)
                 if not delete_success:
@@ -287,7 +325,6 @@ async def update_student(
 @router.post("/universityadmin/teacher", response_model=dict)
 async def add_teacher(
     full_name: str = Form(...),
-    teacher_id: str = Form(...),
     department: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
@@ -301,9 +338,20 @@ async def add_teacher(
             status_code=400, detail="Teacher with this email already exists"
         )
 
+    dept_words = department.strip().split()
+    dept_code = ''.join([word[0].upper() for word in dept_words if word])
+    
+    import random
+    random_digits = f"{random.randint(0, 999):03d}"
+    
+    teacher_id = f"{dept_code}-{random_digits}"
+    
+    while db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first():
+        random_digits = f"{random.randint(0, 999):03d}"
+        teacher_id = f"{dept_code}-{random_digits}"
+
     image_url = None
     if image:
-
         image_path = os.path.join("temp", image.filename)
         with open(image_path, "wb") as buffer:
             os.makedirs("temp", exist_ok=True)
@@ -335,7 +383,7 @@ async def add_teacher(
     return {
         "success": True,
         "status": 201,
-        "teacher_id": new_teacher.id,
+        "teacher_id": teacher_id,  
     }
 
 
@@ -417,8 +465,27 @@ async def update_teacher(
     if full_name:
         teacher.full_name = full_name
 
+    should_regenerate_id = False
+
     if department:
         teacher.department = department
+        should_regenerate_id = True
+
+    if should_regenerate_id:
+        import random
+
+        dept_words = teacher.department.strip().split()
+        dept_code = ''.join([word[0].upper() for word in dept_words if word])
+
+        random_digits = f"{random.randint(0, 999):03d}"
+
+        new_teacher_id = f"{dept_code}-{random_digits}"
+
+        while db.query(Teacher).filter(Teacher.teacher_id == new_teacher_id).first():
+            random_digits = f"{random.randint(0, 999):03d}"
+            new_teacher_id = f"{dept_code}-{random_digits}"
+
+        teacher.teacher_id = new_teacher_id
 
     if password:
         teacher.password = get_password_hash(password)
