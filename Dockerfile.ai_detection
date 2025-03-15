@@ -1,20 +1,51 @@
-FROM python:3.9
+FROM python:3.10-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install dependencies BEFORE generated_text_detector to avoid conflicts
-RUN pip install --no-cache-dir torch==2.2.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir beautifulsoup4==4.12.3 fastapi==0.110.0 Markdown==3.7 numpy==1.25.2 nltk==3.8.1 starlette==0.36.3 transformers==4.38.2 uvicorn==0.27.1
+# Install git and network tools
+RUN apt-get update && \
+    apt-get install -y git ca-certificates wget curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Now install generated_text_detector (it will use the already installed torch)
-RUN pip install --no-cache-dir git+https://github.com/superannotateai/generated_text_detector.git@v1.1.0
+# Set environment variables for larger timeouts but DISABLE hf_transfer
+ENV HF_HUB_ENABLE_HF_TRANSFER=0
+ENV HF_TRANSFER_DISABLE_PROGRESS_BARS=1
+ENV HF_HUB_DOWNLOAD_TIMEOUT=1800
 
-# Copy the FastAPI application
-COPY . .
+# Install PyTorch with extended timeout and retries
+RUN pip install --no-cache-dir --timeout=1800 --retries=5 \
+    torch==2.2.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Install other dependencies with extended timeout
+RUN pip install --no-cache-dir --timeout=1800 --retries=5 \
+    beautifulsoup4==4.12.3 \
+    fastapi==0.110.0 \
+    Markdown==3.7 \
+    numpy==1.25.2 \
+    nltk==3.8.1 \
+    starlette==0.36.3 \
+    transformers==4.38.2 \
+    uvicorn==0.27.1
+
+# Configure transformers to use disk offload to reduce memory usage
+ENV TRANSFORMERS_OFFLINE=0
+ENV HF_HOME="/app/models_cache"
+RUN mkdir -p /app/models_cache
+
+# Install generated_text_detector with extended timeout
+RUN pip install --no-cache-dir --timeout=1800 --retries=5 \
+    git+https://github.com/superannotateai/generated_text_detector.git@v1.1.0
+
+# Copy just what we need (to minimize context for better caching)
+COPY ./ai_detection.py .
 
 # Expose the API port
 EXPOSE 5000
+
+# Download models during build to avoid first-request delay
+RUN python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; AutoTokenizer.from_pretrained('roberta-large'); AutoModelForSequenceClassification.from_pretrained('roberta-large')"
 
 # Run FastAPI app
 CMD ["uvicorn", "ai_detection:app", "--host", "0.0.0.0", "--port", "5000"]

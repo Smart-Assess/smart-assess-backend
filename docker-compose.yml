@@ -13,6 +13,11 @@ services:
       - .env
     depends_on:
       - ai_detection
+    networks:
+      - smart-assess-network
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
 
   ai_detection:
     build:
@@ -20,3 +25,17 @@ services:
       dockerfile: Dockerfile.ai_detection
     ports:
       - "5000:5000"
+    networks:
+      - smart-assess-network
+    restart: on-failure
+    volumes:
+      - model-cache:/app/models_cache
+    environment:
+      - PYTHONUNBUFFERED=1
+
+networks:
+  smart-assess-network:
+    driver: bridge
+
+volumes:
+  model-cache:
