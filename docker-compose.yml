@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./temp:/app/temp
+    env_file:
+      - .env
+    depends_on:
+      - ai_detection
+
+  ai_detection:
+    build:
+      context: .
+      dockerfile: Dockerfile.ai_detection
+    ports:
+      - "5000:5000"
