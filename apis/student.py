@@ -207,6 +207,7 @@ async def submit_assignment(
             "message": "Submission saved successfully",
             "submission": {
                 "id": submission.id,
+                "assignment_id": submission.assignment_id,
                 "pdf_url": submission.submission_pdf_url,
                 "submitted_at": submission.submitted_at
             }
@@ -222,10 +223,12 @@ async def delete_submission(
     db: Session = Depends(get_db),
     current_student: Student = Depends(get_current_admin)
 ):
+    print("current student id",current_student.id,assignment_id)
     submission = db.query(AssignmentSubmission).filter(
         AssignmentSubmission.assignment_id == assignment_id,
         AssignmentSubmission.student_id == current_student.id
     ).first()
+    print("submission id: ", submission)
     
     if not submission:
         raise HTTPException(

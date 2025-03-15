@@ -9,7 +9,7 @@ def get_student_token():
     """Get authentication token for student"""
     login_data = {
         'grant_type': 'password',
-        'username': 's@gmail.com',
+        'username': 'maira.usman5703@gmail.com',
         'password': '12345',
         'scope': '',
         'client_id': '',
@@ -43,7 +43,7 @@ def test_join_course():
         return
     
     data = {
-        "course_code": "ZZTU42"
+        "course_code": "XQKG45"
     }
 
     try:
@@ -71,7 +71,7 @@ def test_submit_assignment(assignment_id):
     
     try:
         # Verify PDF exists
-        pdf_path = '/home/samadpls/proj/fyp/smart-assess-backend/p3.pdf'
+        pdf_path = '/home/myra/Downloads/p1.pdf'
         if not Path(pdf_path).exists():
             print(f"PDF not found at {pdf_path}")
             return
@@ -110,7 +110,36 @@ def test_submit_assignment(assignment_id):
                 if hasattr(file_tuple[1], 'close'):
                     file_tuple[1].close()
 
+def test_delete_submission(assignment_id):
+    """Test deleting a submission"""
 
+    # Get authorization token
+    token = get_student_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+
+    try:
+        # Send DELETE request
+        response = requests.delete(
+            f"{BASE_URL}/student/assignment/{assignment_id}/submission",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json"
+            }
+        )
+
+        # Print response details
+        print(f"Submission Deletion Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+
+        # Return success status
+        return response.json()
+    
+    except Exception as e:
+        print(f"Error deleting submission: {str(e)}")
+        return None
+    
 def upload_assignment(token, course_id, assignment_id, pdf_path):
     """Upload assignment for a given course and assignment ID"""
     try:
@@ -155,16 +184,11 @@ def upload_assignment(token, course_id, assignment_id, pdf_path):
 
 def main():
     # Login with first student account
-    token1 = get_student_token('s@gmail.com', '12345')
+    token1 = get_student_token()
     if not token1:
         print("Failed to get authorization token for s@gmail.com")
         return
 
-    # Login with second student account
-    token2 = get_student_token('s1@gmail.com', '12345')
-    if not token2:
-        print("Failed to get authorization token for s1@gmail.com")
-        return
 
     # Upload assignment for both students
     course_id = 175
@@ -182,10 +206,12 @@ def main():
     print(f"Submission ID for s1@gmail.com: {submission_id2}")
 
 if __name__ == "__main__":
-    main()
+    # main()
     # print("Testing Course Join:")
     # request_id = test_join_course()
     
-    # print("\nTesting Assignment Submission:")
-    # submission_id = test_submit_assignment(6)
+    print("\nTesting Assignment Submission:")
+    # submission_id = test_submit_assignment(34)
+    print(" tesing assignment deletion")
+    test_delete_submission(34)
     # print(f"Submission ID: {submission_id}")
