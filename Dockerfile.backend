@@ -4,11 +4,26 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+# Install build dependencies for psycopg2 and network utilities
+RUN apt-get update && apt-get install -y \
+    gcc \
+    python3-dev \
+    libpq-dev \
+    ca-certificates \
+    wget \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages with extended timeout and retries
+RUN pip install --no-cache-dir --timeout=600 --retries=5 -r requirements.txt
+RUN pip install --no-cache-dir --timeout=600 --retries=5 psycopg2-binary python-multipart
 
 COPY . .
+RUN rm -f ai_detection.py
 
 RUN mkdir -p temp
+RUN mkdir -p tmp
 
 EXPOSE 8000
 
