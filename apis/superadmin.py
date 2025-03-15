@@ -58,7 +58,6 @@ async def add_university(
 
     image_url = None
     if image:
-        # image_path = f"/tmp/{image.filename}"
         image_path = os.path.join("temp", image.filename)
         with open(image_path, "wb") as buffer:
             os.makedirs("temp", exist_ok=True)

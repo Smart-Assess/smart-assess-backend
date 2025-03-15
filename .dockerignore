@@ -18,7 +18,8 @@ Dockerfile
 # Byte-compiled / optimized / DLL files
 **/__pycache__/
 **/*.py[cod]
-
+university_logo.png
+.*pdf
 # C extensions
 *.so
 
@@ -71,7 +72,6 @@ docs/_build/
 target/
 
 # Virtual environment
-.env
 .venv/
 venv/
 
