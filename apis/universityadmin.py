@@ -17,7 +17,11 @@ from typing import Optional
 
 from utils.s3 import upload_to_s3, delete_from_s3
 from utils.security import get_password_hash
+
+from fastapi import HTTPException
+from utils.smtp import send_email  
 import os
+
 router = APIRouter()
 
 
@@ -33,16 +37,21 @@ async def add_student(
     password: str = Form(...),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin),  # Get the current admin's info
+    current_admin: UniversityAdmin = Depends(
+        get_current_admin
+    ),  # Get the current admin's info
 ):
     # Check if a student with the same email already exists
     existing_student = db.query(Student).filter(Student.email == email).first()
     if existing_student:
-        raise HTTPException(status_code=400, detail="Student with this email already exists")
+        raise HTTPException(
+            status_code=400, detail="Student with this email already exists"
+        )
     image_url = None
     if image:
-        image_path = f"/tmp/{image.filename}"
+        image_path = os.path.join("temp", image.filename)
         with open(image_path, "wb") as buffer:
+            os.makedirs("temp", exist_ok=True)
             buffer.write(await image.read())
         image_url = upload_to_s3(
             folder_name="student_images", file_name=image.filename, file_path=image_path
@@ -65,7 +74,7 @@ async def add_student(
         password=get_password_hash(password),  # Hash the password
         university_id=current_admin.university_id,  # Set university_id from the admin's associated university
     )
-
+    send_email(email,"",password,"student")
     # Add the new student to the session and commit
     db.add(new_student)
     db.commit()
@@ -76,6 +85,8 @@ async def add_student(
         "status": 201,
         "student_id": new_student.id,
     }
+
+
 @router.get("/universityadmin/students", response_model=dict)
 async def get_students(
     page: int = 1,
@@ -85,7 +96,11 @@ async def get_students(
 ):
     offset = (page - 1) * limit
 
-    total = db.query(Student).filter(Student.university_id == current_admin.university_id).count()
+    total = (
+        db.query(Student)
+        .filter(Student.university_id == current_admin.university_id)
+        .count()
+    )
 
     students = (
         db.query(Student)
@@ -97,16 +112,18 @@ async def get_students(
 
     students_data = []
     for student in students:
-        students_data.append({
-            "id": student.id,
-            "full_name": student.full_name,
-            "student_id": student.student_id,
-            "department": student.department,
-            "email": student.email,
-            "image_url": student.image_url,
-            "created_at": student.created_at,
-            "university_id": student.university_id,
-        })
+        students_data.append(
+            {
+                "id": student.id,
+                "full_name": student.full_name,
+                "student_id": student.student_id,
+                "department": student.department,
+                "email": student.email,
+                "image_url": student.image_url,
+                "created_at": student.created_at,
+                "university_id": student.university_id,
+            }
+        )
 
     return {
         "success": True,
@@ -119,13 +136,16 @@ async def get_students(
         "has_next": (offset + limit) < total,
     }
 
+
 @router.get("/universityadmin/student/{student_id}", response_model=dict)
 async def get_student(
     student_id: str,  # Change to str
     db: Session = Depends(get_db),
     current_admin: UniversityAdmin = Depends(get_current_admin),
 ):
-    student = db.query(Student).filter(Student.student_id == student_id).first()  # Change to student_id
+    student = (
+        db.query(Student).filter(Student.student_id == student_id).first()
+    )  # Change to student_id
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
@@ -142,27 +162,27 @@ async def get_student(
             "section": student.section,
             "created_at": student.created_at,
             "university_id": student.university_id,
-        }
+        },
     }
+
 
 @router.delete("/universityadmin/student/{student_id}", response_model=dict)
 async def delete_student(
     student_id: str,  # Change to str
     db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin)
+    current_admin: UniversityAdmin = Depends(get_current_admin),
 ):
-    student = db.query(Student).filter(Student.student_id == student_id).first()  # Change to student_id
+    student = (
+        db.query(Student).filter(Student.student_id == student_id).first()
+    )  # Change to student_id
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
     db.delete(student)
     db.commit()
 
-    return {
-        "success": True,
-        "status": 200,
-        "message": "Student deleted successfully"
-    }
+    return {"success": True, "status": 200, "message": "Student deleted successfully"}
+
 
 @router.put("/universityadmin/student/{student_id}", response_model=dict)
 async def update_student(
@@ -175,16 +195,22 @@ async def update_student(
     password: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin)
+    current_admin: UniversityAdmin = Depends(get_current_admin),
 ):
     student = db.query(Student).filter(Student.student_id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
     if email:
-        existing_student = db.query(Student).filter(Student.email == email, Student.student_id != student_id).first()
+        existing_student = (
+            db.query(Student)
+            .filter(Student.email == email, Student.student_id != student_id)
+            .first()
+        )
         if existing_student:
-            raise HTTPException(status_code=400, detail="Email already taken by another student")
+            raise HTTPException(
+                status_code=400, detail="Email already taken by another student"
+            )
 
     if full_name:
         student.full_name = full_name
@@ -217,12 +243,11 @@ async def update_student(
             image_url = upload_to_s3(
                 folder_name="student_images",
                 file_name=image.filename,
-                file_path=image_path
+                file_path=image_path,
             )
             if not image_url:
                 raise HTTPException(
-                    status_code=500,
-                    detail="Failed to upload university image"
+                    status_code=500, detail="Failed to upload university image"
                 )
 
             # Clean up the temporary file
@@ -233,12 +258,11 @@ async def update_student(
         except Exception as e:
             print(f"Error handling image upload: {e}")
             raise HTTPException(
-                status_code=500,
-                detail="An error occurred while processing the image"
+                status_code=500, detail="An error occurred while processing the image"
             )
 
-
     db.commit()
+    send_email(student.email,"",student.password,"student")
     db.refresh(student)
 
     return {
@@ -255,8 +279,10 @@ async def update_student(
             "image_url": student.image_url,
             "created_at": student.created_at,
             "university_id": student.university_id,
-        }
+        },
     }
+
+
 ############################### TEACHER #################################
 @router.post("/universityadmin/teacher", response_model=dict)
 async def add_teacher(
@@ -271,12 +297,16 @@ async def add_teacher(
 ):
     existing_teacher = db.query(Teacher).filter(Teacher.email == email).first()
     if existing_teacher:
-        raise HTTPException(status_code=400, detail="Teacher with this email already exists")
+        raise HTTPException(
+            status_code=400, detail="Teacher with this email already exists"
+        )
 
     image_url = None
     if image:
-        image_path = f"/tmp/{image.filename}"
+
+        image_path = os.path.join("temp", image.filename)
         with open(image_path, "wb") as buffer:
+            os.makedirs("temp", exist_ok=True)
             buffer.write(await image.read())
         image_url = upload_to_s3(
             folder_name="teacher_images", file_name=image.filename, file_path=image_path
@@ -296,6 +326,7 @@ async def add_teacher(
         image_url=image_url,
         university_id=current_admin.university_id,
     )
+    send_email(email,"",password,"teacher")
 
     db.add(new_teacher)
     db.commit()
@@ -306,13 +337,17 @@ async def add_teacher(
         "status": 201,
         "teacher_id": new_teacher.id,
     }
+
+
 @router.get("/universityadmin/teacher/{teacher_id}", response_model=dict)
 async def get_teacher(
     teacher_id: str,  # Change to str
     db: Session = Depends(get_db),
     current_admin: UniversityAdmin = Depends(get_current_admin),
 ):
-    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()  # Change to teacher_id
+    teacher = (
+        db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
+    )  # Change to teacher_id
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
@@ -328,38 +363,38 @@ async def get_teacher(
             "image_url": teacher.image_url,
             "created_at": teacher.created_at,
             "university_id": teacher.university_id,
-        }
+        },
     }
+
 
 @router.delete("/universityadmin/teacher/{teacher_id}", response_model=dict)
 async def delete_teacher(
     teacher_id: str,  # Change to str
     db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin)
+    current_admin: UniversityAdmin = Depends(get_current_admin),
 ):
-    teacher = db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()  # Change to teacher_id
+    teacher = (
+        db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first()
+    )  # Change to teacher_id
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
     db.delete(teacher)
     db.commit()
 
-    return {
-        "success": True,
-        "status": 200,
-        "message": "Teacher deleted successfully"
-    }
+    return {"success": True, "status": 200, "message": "Teacher deleted successfully"}
+
 
 @router.put("/universityadmin/teacher/{teacher_id}", response_model=dict)
 async def update_teacher(
-    teacher_id: str,  
+    teacher_id: str,
     full_name: Optional[str] = Form(None),
     department: Optional[str] = Form(None),
     email: Optional[str] = Form(None),
     password: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_admin: UniversityAdmin = Depends(get_current_admin)
+    current_admin: UniversityAdmin = Depends(get_current_admin),
 ):
     """Update teacher details with all fields optional except teacher_id."""
 
@@ -368,9 +403,15 @@ async def update_teacher(
         raise HTTPException(status_code=404, detail="Teacher not found")
 
     if email:
-        existing_teacher = db.query(Teacher).filter(Teacher.email == email, Teacher.teacher_id != teacher_id).first()
+        existing_teacher = (
+            db.query(Teacher)
+            .filter(Teacher.email == email, Teacher.teacher_id != teacher_id)
+            .first()
+        )
         if existing_teacher:
-            raise HTTPException(status_code=400, detail="Email already taken by another teacher")
+            raise HTTPException(
+                status_code=400, detail="Email already taken by another teacher"
+            )
         teacher.email = email
 
     if full_name:
@@ -400,12 +441,11 @@ async def update_teacher(
             image_url = upload_to_s3(
                 folder_name="teacher_images",
                 file_name=image.filename,
-                file_path=image_path
+                file_path=image_path,
             )
             if not image_url:
                 raise HTTPException(
-                    status_code=500,
-                    detail="Failed to upload university image"
+                    status_code=500, detail="Failed to upload university image"
                 )
 
             # Clean up the temporary file
@@ -416,11 +456,11 @@ async def update_teacher(
         except Exception as e:
             print(f"Error handling image upload: {e}")
             raise HTTPException(
-                status_code=500,
-                detail="An error occurred while processing the image"
+                status_code=500, detail="An error occurred while processing the image"
             )
 
     db.commit()
+    send_email(teacher.email,"",teacher.password,"teacher")
     db.refresh(teacher)
 
     return {
@@ -435,8 +475,9 @@ async def update_teacher(
             "image_url": teacher.image_url,
             "created_at": teacher.created_at,
             "university_id": teacher.university_id,
-        }
+        },
     }
+
 
 @router.get("/universityadmin/teachers", response_model=dict)
 async def get_teachers(
@@ -446,23 +487,35 @@ async def get_teachers(
     current_admin: UniversityAdmin = Depends(get_current_admin),
 ):
     offset = (page - 1) * limit
-    
-    total = db.query(Teacher).filter(Teacher.university_id == current_admin.university_id).count()
-    
-    teachers = db.query(Teacher).filter(Teacher.university_id == current_admin.university_id).offset(offset).limit(limit).all()
-    
+
+    total = (
+        db.query(Teacher)
+        .filter(Teacher.university_id == current_admin.university_id)
+        .count()
+    )
+
+    teachers = (
+        db.query(Teacher)
+        .filter(Teacher.university_id == current_admin.university_id)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
     teachers_data = []
     for teacher in teachers:
-        teachers_data.append({
-            "id": teacher.id,
-            "full_name": teacher.full_name,
-            "teacher_id": teacher.teacher_id,
-            "department": teacher.department,
-            "email": teacher.email,
-            "image_url": teacher.image_url,
-            "created_at": teacher.created_at,
-            "university_id": teacher.university_id,
-        })
+        teachers_data.append(
+            {
+                "id": teacher.id,
+                "full_name": teacher.full_name,
+                "teacher_id": teacher.teacher_id,
+                "department": teacher.department,
+                "email": teacher.email,
+                "image_url": teacher.image_url,
+                "created_at": teacher.created_at,
+                "university_id": teacher.university_id,
+            }
+        )
 
     return {
         "success": True,

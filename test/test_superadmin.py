@@ -121,11 +121,11 @@ def test_update_university():
         print("Failed to get authorization token")
         return
 
-    university_id = 35  # Replace with a valid university ID
+    university_id = 116  # Replace with a valid university ID
     headers = {"Authorization": f"Bearer {token}"}
 
     data = {
-        "street_address": "University Road",
+        "zipcode": "75280",
     }
 
     response = requests.put(
@@ -143,8 +143,40 @@ def test_update_university():
     assert response_json["success"] is True
     assert response_json["university"]["street_address"] == data["street_address"]
 
+
+def test_update_university_admin():
+    token = get_auth_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+
+    university_id = 122  # Replace with a valid university ID
+    headers = {"Authorization": f"Bearer {token}"}
+
+    data = {
+        "admin_name": "abdul samad",
+        # "admin_email": "updated_admin@example.com",
+        # "admin_password": "NewSecurePassword123"
+    }
+
+    response = requests.put(
+        f"{BASE_URL}/superadmin/university/{university_id}",
+        data=data,  # Use `data` for form fields
+        headers=headers
+    )
+
+    # Debugging output in case of failure
+    print("Response Status Code:", response.status_code)
+    print("Response JSON:", response.json())
+
+    assert response.status_code == 200, f"Unexpected status code: {response.status_code}"
+    response_json = response.json()
+    assert response_json["success"] is True
+    assert response_json["admin"]["name"] == data["admin_name"]
+    # assert response_json["admin"]["email"] == data["admin_email"]
+
 if __name__ == "__main__":
-    test_update_university()
+    test_update_university_admin()
     # create_superadmin(email="sa@gmail.com", password="12345")
     
 
