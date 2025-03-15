@@ -1,25 +1,20 @@
-FROM python:3.10-slim
+FROM python:3.9
 
+# Set working directory
 WORKDIR /app
 
-# Set environment variables to improve pip performance
-ENV PIP_DEFAULT_TIMEOUT=300 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONUNBUFFERED=1
+# Install dependencies BEFORE generated_text_detector to avoid conflicts
+RUN pip install --no-cache-dir torch==2.2.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir beautifulsoup4==4.12.3 fastapi==0.110.0 Markdown==3.7 numpy==1.25.2 nltk==3.8.1 starlette==0.36.3 transformers==4.38.2 uvicorn==0.27.1
 
-# Install git - required for pip install from git repositories
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+# Now install generated_text_detector (it will use the already installed torch)
+RUN pip install --no-cache-dir git+https://github.com/superannotateai/generated_text_detector.git@v1.1.0
 
-# Install web framework and dependencies
-RUN pip install fastapi uvicorn pydantic 
+# Copy the FastAPI application
+COPY . .
 
-# Install the generated_text_detector library with all dependencies
-RUN pip install git+https://github.com/superannotateai/generated_text_detector.git@v1.1.0
-
-# Copy the AI detection script into the container
-COPY ai_detection.py .
-
+# Expose the API port
 EXPOSE 5000
 
+# Run FastAPI app
 CMD ["uvicorn", "ai_detection:app", "--host", "0.0.0.0", "--port", "5000"]
