@@ -266,7 +266,72 @@ def test_update_assignment():
     except Exception as e:
         print("Error updating assignment:", str(e))
         return None
-
+def test_regenerate_course_code():
+    """Test regenerating a course code for an existing course"""
+    token = get_teacher_token()
+    if not token:
+        print("Failed to get authorization token")
+        return
+    
+    # Assume an existing course has been created and we have its course_id
+    course_id = 5  # Replace with a valid course ID for testing
+    
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'accept': 'application/json'
+    }
+    
+    try:
+        # First, get the current course details to check the original code
+        get_response = requests.get(
+            f"{BASE_URL}/teacher/course/{course_id}",
+            headers=headers
+        )
+        
+        if get_response.status_code != 200:
+            print(f"Failed to get original course details: Status {get_response.status_code}")
+            print(get_response.text)
+            return
+        
+        original_course = get_response.json().get("course", {})
+        original_code = original_course.get("course_code")
+        
+        print(f"Original course code: {original_code}")
+        
+        # Now regenerate the course code
+        response = requests.put(
+            f"{BASE_URL}/teacher/course/{course_id}/regenerate-code",
+            headers=headers
+        )
+        
+        print("Regenerate Code Status:", response.status_code)
+        print("Response:", json.dumps(response.json(), indent=2))
+        
+        if response.status_code == 201:
+            new_code = response.json().get("new_code")
+            print(f"New course code: {new_code}")
+            
+            # Verify the code has changed
+            assert new_code != original_code, "Course code should have changed"
+            
+            # Get updated course details to double check
+            updated_response = requests.get(
+                f"{BASE_URL}/teacher/course/{course_id}",
+                headers=headers
+            )
+            
+            if updated_response.status_code == 200:
+                updated_course = updated_response.json().get("course", {})
+                updated_code = updated_course.get("course_code")
+                
+                assert updated_code == new_code, "Updated course should have the new code"
+                print(f"Successfully verified new code in course: {updated_code}")
+            
+        return response.json()
+    except Exception as e:
+        print(f"Error in test_regenerate_course_code: {str(e)}")
+        return None
+    
 def test_update_course_request(course_id, request_id):
     token = get_teacher_token()
     if not token:
@@ -289,6 +354,7 @@ def test_update_course_request(course_id, request_id):
         print(f"Response: {response.json()}")
     except Exception as e:
         print(f"Error updating request: {str(e)}")
+
 
 def test_evaluate_submissions():
     token = get_teacher_token()
@@ -346,8 +412,6 @@ if __name__ == "__main__":
     # test_delete_course()
     # print("\nTesting Assignment Creation:")
     # assignment_id = test_create_assignment(1)
-    test_update_assignment()
-        
-        # print("\nTesting Course Request Update:")
-        # # Assuming request_id 1 exists
-        # test_update_course_request(1, 1)
+    # test_update_assignment()
+    # test_regenerate_course_code()
+    test_update_course_request(5,1)
