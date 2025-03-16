@@ -112,7 +112,7 @@ class ContextScorer:
             "context_overall_score": round(total_context_score, 4)
         }
 
-    def save_results_to_mongo(self, pdf_file: str, results: dict):
+    def save_results_to_mongo(self, submission_id: str, results: dict):
         """Update evaluation document with context scores"""
         
         # First ensure document exists with questions array
@@ -120,7 +120,7 @@ class ContextScorer:
             {
                 "course_id": self.course_id,
                 "assignment_id": self.assignment_id,
-                "pdf_file": pdf_file
+                "submission_id": submission_id
             },
             {
                 "$setOnInsert": {
@@ -144,7 +144,7 @@ class ContextScorer:
                     {
                         "course_id": self.course_id,
                         "assignment_id": self.assignment_id,
-                        "pdf_file": pdf_file,
+                        "submission_id": submission_id,
                         "questions.question_number": q_num
                     },
                     {
@@ -166,23 +166,23 @@ class ContextScorer:
         if updates:
             self.results_collection.bulk_write(updates)
 
-    def run(self, teacher_questions, questions_answers_by_pdf, total_score: float = 100.0) -> dict:
+    def run(self, teacher_questions, questions_answers_by_submission, submission_ids, total_score: float = 100.0) -> dict:
         final_results = {
             "course_id": self.course_id,
             "assignment_id": self.assignment_id,
             "results": []
         }
 
-        for pdf_file, qa_pairs in questions_answers_by_pdf.items():
+        for submission_id, qa_pairs in questions_answers_by_submission.items():
             # Process submission
             results = self.process_submission(teacher_questions, qa_pairs, total_score=total_score)
             
             # Save to MongoDB
-            self.save_results_to_mongo(pdf_file, results)
+            self.save_results_to_mongo(submission_id, results)
             
             # Add to final results
             submission_result = {
-                "submission_id": pdf_file,
+                "submission_id": submission_id,
                 "question_results": {
                     score["question_key"]: {"context_score": score["context_score"]}
                     for score in results["questions"]
@@ -223,5 +223,5 @@ if __name__ == "__main__":
     )
     
     scorer = ContextScorer(course_id=1, assignment_id=1, rag=rag)
-    results = scorer.run({},{})
+    results = scorer.run({}, {}, {})
     print(results)
