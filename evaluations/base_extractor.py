@@ -7,12 +7,12 @@ from utils.mongodb import mongo_db
 from datetime import datetime, timezone
 
 class PDFQuestionAnswerExtractor:
-    def __init__(self, pdf_files: List[str], course_id: int, assignment_id: int, is_teacher: bool, student_id: str = None):
+    def __init__(self, pdf_files: List[str], course_id: int, assignment_id: int, is_teacher: bool, submission_ids: str = None):
         self.pdf_files = pdf_files
         self.course_id = course_id
         self.assignment_id = assignment_id
         self.is_teacher = is_teacher
-        self.student_id = student_id
+        self.submission_ids = submission_ids
 
         # MongoDB setup
         
@@ -78,13 +78,13 @@ class PDFQuestionAnswerExtractor:
         text = text.strip()
         return text
 
-    def save_to_mongo(self, pdf_file: str, qa_pairs: Dict[str, Dict[str, str]]):
+    def save_to_mongo(self, pdf_file: str, qa_pairs: Dict[str, Dict[str, str]], id):
         """Save extracted Q&A pairs to MongoDB"""
         document = {
             "course_id": self.course_id,
             "assignment_id": self.assignment_id,
             "is_teacher": self.is_teacher,
-            "student_id": self.student_id,
+            "submission_id": self.submission_ids[id],
             "pdf_file": pdf_file,
             "qa_pairs": qa_pairs,
             "extracted_at": datetime.now(timezone.utc)
@@ -94,8 +94,7 @@ class PDFQuestionAnswerExtractor:
                 "course_id": self.course_id,
                 "assignment_id": self.assignment_id,
                 "is_teacher": self.is_teacher,
-                "student_id": self.student_id,
-                "pdf_file": pdf_file
+                "submission_id": self.submission_ids[id],
             },
             {"$set": document},
             upsert=True
@@ -103,15 +102,17 @@ class PDFQuestionAnswerExtractor:
 
     def extract(self):
         """Main extraction method"""
+        id = 0
         for pdf_file in self.pdf_files:
             try:
                 text = self.extract_text_from_pdf(pdf_file)
                 qa_pairs = self.parse_qa(text)
                 print("Question/Answers: ",qa_pairs,"\n")
                 if qa_pairs:
-                    self.save_to_mongo(pdf_file, qa_pairs)
+                    self.save_to_mongo(pdf_file, qa_pairs, id)
                 else:
                     print(f"Warning: No Q&A pairs found in {pdf_file}")
+                id+=1
                     
             except Exception as e:
                 print(f"Error processing {pdf_file}: {str(e)}")

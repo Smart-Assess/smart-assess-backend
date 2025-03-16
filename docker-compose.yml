@@ -9,6 +9,12 @@ services:
       - "8000:8000"
     volumes:
       - ./temp:/app/temp
+      - ./apis:/app/apis
+      - ./models:/app/models
+      - ./routers:/app/routers
+      - ./utils:/app/utils
+      - ./app.py:/app/app.py
+      - ./evaluations:/app/evaluations
     env_file:
       - .env
     depends_on:
@@ -30,6 +36,7 @@ services:
     restart: on-failure
     volumes:
       - model-cache:/app/models_cache
+      - ./ai_detection.py:/app/ai_detection.py
     environment:
       - PYTHONUNBUFFERED=1
 
