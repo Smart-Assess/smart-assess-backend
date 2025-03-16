@@ -48,4 +48,4 @@ EXPOSE 5000
 RUN python -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification; AutoTokenizer.from_pretrained('roberta-large'); AutoModelForSequenceClassification.from_pretrained('roberta-large')"
 
 # Run FastAPI app
-CMD ["uvicorn", "ai_detection:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uvicorn", "ai_detection:app", "--host", "0.0.0.0", "--port", "5000", "--reload"]
