@@ -176,6 +176,7 @@ async def get_student(
             "email": student.email,
             "batch": student.batch,
             "section": student.section,
+            "image_url": student.image_url,
             "created_at": student.created_at,
             "university_id": student.university_id,
         },
