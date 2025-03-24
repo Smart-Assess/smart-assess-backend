@@ -9,9 +9,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 from evaluations.base_extractor import PDFQuestionAnswerExtractor
 from evaluations.context_score import ContextScorer
-from evaluations.plagiarism import PlagiarismChecker
 from evaluations.grammar import GrammarChecker
 from evaluations.assignment_score import AssignmentScoreCalculator
+from evaluations.feedback import FeedbackGenerator
 from utils.mongodb import mongo_db
 from models.models import AssignmentEvaluation
 
@@ -22,18 +22,45 @@ class AssignmentEvaluator:
         self.request = request
         self.rag = rag
         self.db = db
+        
+        # Initialize all components that always get used
         self.qa_extractor = PDFQuestionAnswerExtractor([], course_id, assignment_id, is_teacher=False)
         self.context_scorer = ContextScorer(course_id, assignment_id, rag)
+        self.feedback_generator = FeedbackGenerator(course_id, assignment_id)
+        
+        # Initialize optional components early based on request
         self.plagiarism_checker = None
+        self.ai_detector = None
         self.grammar_checker = None
-        if request.enable_plagiarism:
-            self.plagiarism_checker = PlagiarismChecker(course_id, assignment_id)
-        if request.enable_grammar:
-            self.grammar_checker = GrammarChecker()
-
-    def extract_qa_pairs(self, pdf_files):
-        self.qa_extractor.pdf_files = pdf_files
-        self.qa_extractor.extract()
+        
+        # Log evaluation options
+        print(f"Assignment Evaluator initialized with:")
+        print(f"  - Course ID: {course_id}")
+        print(f"  - Assignment ID: {assignment_id}")
+        print(f"  - Plagiarism checking: {'Enabled' if request.enable_plagiarism else 'Disabled'}")
+        print(f"  - Grammar checking: {'Enabled' if request.enable_grammar else 'Disabled'}")
+        print(f"  - AI detection: {'Enabled' if request.enable_ai_detection else 'Disabled'}")
+        
+    def extract_qa_pairs(self, pdf_files, submission_ids=[]):
+        teacher_pdf = pdf_files[0]
+        student_pdfs = pdf_files[1:]
+        
+        teacher_extractor = PDFQuestionAnswerExtractor(
+            pdf_files=[teacher_pdf],
+            course_id=self.course_id,
+            assignment_id=self.assignment_id,
+            is_teacher=True
+        )
+        teacher_extractor.extract()
+        
+        student_extractor = PDFQuestionAnswerExtractor(
+            pdf_files=student_pdfs,
+            course_id=self.course_id,
+            assignment_id=self.assignment_id,
+            submission_ids=submission_ids,
+            is_teacher=False
+        )
+        student_extractor.extract()
 
     def fetch_qa_pairs(self):
         """Fetch Q&A pairs from MongoDB for the given course and assignment"""
@@ -43,100 +70,290 @@ class AssignmentEvaluator:
         })
 
         teacher_questions = {}
-        questions_answers_by_pdf = {}
+        questions_answers_by_submission = {}
 
         for document in cursor:
-            pdf_file = document['pdf_file']
+            submission_id = document['submission_id']
             if document['is_teacher']:
                 teacher_questions = document.get('qa_pairs', {})
             else:
-                questions_answers_by_pdf[pdf_file] = document.get('qa_pairs', {})
+                questions_answers_by_submission[submission_id] = document.get('qa_pairs', {})
 
-        return teacher_questions, questions_answers_by_pdf
+        return teacher_questions, questions_answers_by_submission
 
     def run(self, pdf_files, total_grade, submission_ids):
-        self.extract_qa_pairs(pdf_files)
-        teacher_questions, questions_answers_by_pdf = self.fetch_qa_pairs()
-
-        _ = self.context_scorer.run(teacher_questions, questions_answers_by_pdf)
-        if self.plagiarism_checker:
-            _ = self.plagiarism_checker.run(teacher_questions, questions_answers_by_pdf)
-
-        # Combine results and calculate total scores
-        for pdf_file, submission_id in zip(pdf_files[1:], submission_ids):
-            submission_data = mongo_db.db['evaluation_results'].find_one({
-                "course_id": self.course_id,
-                "assignment_id": self.assignment_id,
-                "pdf_file": pdf_file
-            })
-
-            if submission_data:
-                question_results = {}
-                for question in submission_data.get("questions", []):
-                    q_num = question["question_number"]
-                    context_score = question["scores"].get("context", {}).get("score", 0)
-                    plagiarism_score = question["scores"].get("plagiarism", {}).get("score", 0)
-                    ai_score = question["scores"].get("ai_detection", {}).get("score", 0)
-                    grammar_score = question["scores"].get("grammar", {}).get("score", 0)
+        # Extract questions and answers from PDFs
+        self.extract_qa_pairs(pdf_files, submission_ids=submission_ids)
+        teacher_questions, questions_answers_by_submission = self.fetch_qa_pairs()
+    
+        # Run context scoring
+        context_results = self.context_scorer.run(teacher_questions, questions_answers_by_submission, submission_ids, total_score=total_grade)
+        print(f"Context scoring completed: {len(context_results['results'])} submissions processed")
+        
+        # Run plagiarism checking if enabled
+        if self.request.enable_plagiarism:
+            try:
+                from evaluations.plagiarism import PlagiarismChecker
+                self.plagiarism_checker = PlagiarismChecker(self.course_id, self.assignment_id, submission_ids=submission_ids)
+                plagiarism_results = self.plagiarism_checker.run(teacher_questions, questions_answers_by_submission, submission_ids=submission_ids)
+                print(f"Plagiarism checking completed: {len(plagiarism_results['results'])} submissions processed")
+            except Exception as e:
+                print(f"Error in plagiarism checking: {str(e)}")
+        
+        # Run AI detection if enabled
+        if self.request.enable_ai_detection:
+            try:
+                from evaluations.ai_detection import AIDetector
+                self.ai_detector = AIDetector(self.course_id, self.assignment_id)
+                ai_results = self.ai_detector.run(teacher_questions, questions_answers_by_submission, submission_ids=submission_ids)
+                print(f"AI detection completed: {len(ai_results['results']) if ai_results else 0} submissions processed")
+                
+                # Debug: print the AI scores for each question in each submission
+                for submission_id, scores in ai_results.items():
+                    print(f"AI detection scores for {submission_id}: {scores}")
+            except Exception as e:
+                print(f"Error in AI detection: {str(e)}")
+        
+        # Run grammar checking if enabled
+        if self.request.enable_grammar:
+            try:
+                self.grammar_checker = GrammarChecker()
+                processed_count = 0
+                
+                for submission_id, qa_pairs in questions_answers_by_submission.items():
+                    for key, text in qa_pairs.items():
+                        if key.startswith("Answer#"):
+                            q_num = int(key.split('#')[1])
+                            
+                            # Skip empty answers
+                            if not text or len(text.strip()) < 5:
+                                continue
+                            
+                            # Evaluate grammar
+                            print(f"Checking grammar for {submission_id} - Question {q_num}")
+                            corrected_text, grammar_score = self.grammar_checker.evaluate(text)
+                            print(f"Grammar score for {submission_id} - Question {q_num}: {grammar_score}")
+                            processed_count += 1
+                            
+                            # Save grammar scores to MongoDB
+                            mongo_db.db['evaluation_results'].update_one(
+                                {
+                                    "course_id": self.course_id,
+                                    "assignment_id": self.assignment_id,
+                                    "submission_id": submission_id,
+                                    "questions.question_number": q_num
+                                },
+                                {
+                                    "$set": {
+                                        "questions.$.scores.grammar": {
+                                            "score": round(grammar_score, 4),
+                                            "evaluated_at": datetime.now(timezone.utc)
+                                        }
+                                    }
+                                }
+                            )
+                            
+                    # Calculate and save overall grammar score
+                    cursor = mongo_db.db['evaluation_results'].find_one(
+                        {
+                            "course_id": self.course_id,
+                            "assignment_id": self.assignment_id,
+                            "submission_id": submission_id
+                        }
+                    )
                     
-                    # Evaluate grammar if enabled
-                    if self.grammar_checker:
-                        answer_text = question["answer"]
-                        corrected_text, grammar_score = self.grammar_checker.evaluate(answer_text)
+                    if cursor:
+                        questions = cursor.get("questions", [])
+                        total_grammar = 0
+                        count = 0
+                        
+                        for q in questions:
+                            grammar_score = q.get("scores", {}).get("grammar", {}).get("score", 0)
+                            if grammar_score > 0:
+                                total_grammar += grammar_score
+                                count += 1
+                        
+                        avg_grammar = total_grammar / count if count > 0 else 0
+                        print(f"Overall grammar score for {submission_id}: {avg_grammar}")
+                        
+                        mongo_db.db['evaluation_results'].update_one(
+                            {
+                                "course_id": self.course_id,
+                                "assignment_id": self.assignment_id,
+                                "submission_id": submission_id
+                            },
+                            {
+                                "$set": {
+                                    "overall_scores.grammar": {
+                                        "score": round(avg_grammar, 4),
+                                        "evaluated_at": datetime.now(timezone.utc)
+                                    }
+                                }
+                            }
+                        )
+                print(f"Grammar checking completed: {processed_count} answers processed")
+            except Exception as e:
+                print(f"Error in grammar checking: {str(e)}")
+        
+        # Generate feedback for each submission
+        try:
+            for i, pdf_file in enumerate(pdf_files[1:]):  # Skip teacher PDF
+                if i < len(submission_ids):
+                    submission_id = submission_ids[i]
+                    feedback_result = self.feedback_generator.run([pdf_file], [submission_id])
+                    print(f"Feedback generated for submission {submission_id}: {feedback_result}")
+        except Exception as e:
+            print(f"Error generating feedback: {str(e)}")
+        
+        # Calculate total scores for all submissions
+        total_scores = []
+        
+        for i, pdf_file in enumerate(pdf_files[1:]):  # Skip teacher PDF
+            if i < len(submission_ids):
+                submission_id = submission_ids[i]
+                
+                # Get evaluation data from MongoDB
+                eval_doc = mongo_db.db['evaluation_results'].find_one({
+                    "course_id": self.course_id,
+                    "assignment_id": self.assignment_id,
+                    "submission_id": submission_id
+                })
+                
+                if eval_doc:
+                    questions = eval_doc.get("questions", [])
+                    question_results = {}
                     
-                    question_results[f"Question#{q_num}"] = {
-                        "context_score": context_score,
-                        "plagiarism_score": plagiarism_score,
-                        "ai_score": ai_score,
-                        "grammar_score": grammar_score
-                    }
-
-                # Calculate total score
-                score_calculator = AssignmentScoreCalculator(
-                    total_grade=total_grade,
-                    num_questions=len(question_results),
-                    db=self.db
-                )
-                evaluation_result = score_calculator.calculate_submission_evaluation(
-                    question_results=question_results
-                )
-
-                # Save to PostgreSQL
-                evaluation = AssignmentEvaluation(
-                    submission_id=submission_id,
-                    total_score=evaluation_result["total_score"],
-                    plagiarism_score=evaluation_result["avg_plagiarism_score"],
-                    ai_detection_score=evaluation_result["avg_ai_score"],
-                    grammar_score=evaluation_result["avg_grammar_score"],
-                    feedback=None
-                )
-                self.db.add(evaluation)
-                self.db.commit()
-
-                # Save individual question results to MongoDB
-                for q_num, scores in evaluation_result["questions"].items():
-                    update_data = {
-                        "questions.$.scores.total": {
-                            "score": scores["total_score"],
+                    # Build question results dictionary
+                    for question in questions:
+                        q_num = question.get("question_number")
+                        scores = question.get("scores", {})
+                        
+                        # Get individual scores with proper debugging
+                        context_score = scores.get("context", {}).get("score", 0)
+                        plagiarism_score = scores.get("plagiarism", {}).get("score", 0)
+                        ai_score = scores.get("ai_detection", {}).get("score", 0)
+                        grammar_score = scores.get("grammar", {}).get("score", 0)
+                        
+                        print(f"Scores for {submission_id} - Q{q_num}: Context={context_score}, Plagiarism={plagiarism_score}, AI={ai_score}, Grammar={grammar_score}")
+                        
+                        question_results[f"Question#{q_num}"] = {
+                            "context_score": context_score,
+                            "plagiarism_score": plagiarism_score,
+                            "ai_score": ai_score,
+                            "grammar_score": grammar_score
+                        }
+                    
+                    # Calculate final scores
+                    score_calculator = AssignmentScoreCalculator(
+                        total_grade=total_grade,
+                        num_questions=max(len(question_results), 1),  # Prevent division by zero
+                        db=self.db
+                    )
+                    
+                    evaluation_result = score_calculator.calculate_submission_evaluation(
+                        question_results=question_results
+                    )
+                    
+                    # Debug output
+                    print(f"Evaluation result for submission {submission_id}:")
+                    print(f"  Total score: {evaluation_result['total_score']}")
+                    print(f"  Context score: {evaluation_result.get('avg_context_score', 0)}")
+                    print(f"  Plagiarism score: {evaluation_result.get('avg_plagiarism_score', 0)}")
+                    print(f"  AI score: {evaluation_result.get('avg_ai_score', 0)}")
+                    print(f"  Grammar score: {evaluation_result.get('avg_grammar_score', 0)}")
+                    
+                    # Save all scores to MongoDB in one go
+                    update_fields = {
+                        "overall_scores.total": {
+                            "score": evaluation_result["total_score"],
                             "evaluated_at": datetime.now(timezone.utc)
                         }
                     }
-                    if self.grammar_checker:
-                        update_data["questions.$.scores.grammar"] = {
-                            "score": scores["grammar_score"],
+                    
+                    # Only set these fields if they exist in the results
+                    if "avg_context_score" in evaluation_result:
+                        update_fields["overall_scores.context"] = {
+                            "score": evaluation_result["avg_context_score"],
                             "evaluated_at": datetime.now(timezone.utc)
                         }
+                        
+                    if "avg_plagiarism_score" in evaluation_result:
+                        update_fields["overall_scores.plagiarism"] = {
+                            "score": evaluation_result["avg_plagiarism_score"],
+                            "evaluated_at": datetime.now(timezone.utc)
+                        }
+                        
+                    if "avg_ai_score" in evaluation_result:
+                        update_fields["overall_scores.ai_detection"] = {
+                            "score": evaluation_result["avg_ai_score"],
+                            "evaluated_at": datetime.now(timezone.utc)
+                        }
+                        
+                    if "avg_grammar_score" in evaluation_result:
+                        update_fields["overall_scores.grammar"] = {
+                            "score": evaluation_result["avg_grammar_score"],
+                            "evaluated_at": datetime.now(timezone.utc)
+                        }
+                    
+                    # Save to MongoDB
                     mongo_db.db['evaluation_results'].update_one(
                         {
                             "course_id": self.course_id,
                             "assignment_id": self.assignment_id,
-                            "pdf_file": pdf_file,
-                            "questions.question_number": int(q_num.split('#')[1])
+                            "submission_id": submission_id
                         },
                         {
-                            "$set": update_data
+                            "$set": update_fields
                         }
                     )
+                    
+                    # Get feedback content
+                    feedback_content = ""
+                    feedback_data = eval_doc.get("overall_feedback", {})
+                    if isinstance(feedback_data, dict):
+                        feedback_content = feedback_data.get("content", "")
+                    elif isinstance(feedback_data, str):
+                        feedback_content = feedback_data
+                    
+                    # Save to PostgreSQL
+                    existing_eval = self.db.query(AssignmentEvaluation).filter(
+                        AssignmentEvaluation.submission_id == submission_id
+                    ).first()
+                    
+                    if existing_eval:
+                        existing_eval.total_score = evaluation_result["total_score"]
+                        existing_eval.plagiarism_score = evaluation_result.get("avg_plagiarism_score", 0)
+                        existing_eval.ai_detection_score = evaluation_result.get("avg_ai_score", 0)
+                        existing_eval.grammar_score = evaluation_result.get("avg_grammar_score", 0)
+                        existing_eval.feedback = feedback_content
+                        existing_eval.updated_at = datetime.now()
+                    else:
+                        # Create new evaluation record
+                        new_eval = AssignmentEvaluation(
+                            submission_id=submission_id,
+                            total_score=evaluation_result["total_score"],
+                            plagiarism_score=evaluation_result.get("avg_plagiarism_score", 0),
+                            ai_detection_score=evaluation_result.get("avg_ai_score", 0),
+                            grammar_score=evaluation_result.get("avg_grammar_score", 0),
+                            feedback=feedback_content
+                        )
+                        self.db.add(new_eval)
+                    
+                    # Commit changes to PostgreSQL
+                    self.db.commit()
+                    
+                    # Add to total scores list for return value
+                    total_scores.append({
+                        "submission_id": submission_id,
+                        "total_score": evaluation_result["total_score"],
+                        "context_score": evaluation_result.get("avg_context_score", 0),
+                        "plagiarism_score": evaluation_result.get("avg_plagiarism_score", 0),
+                        "ai_score": evaluation_result.get("avg_ai_score", 0),
+                        "grammar_score": evaluation_result.get("avg_grammar_score", 0)
+                    })
+        
+        print(f"Total scores calculated: {len(total_scores)}")
+        return total_scores
 
 
 if __name__ == "__main__":
@@ -153,7 +370,7 @@ if __name__ == "__main__":
         collection_name="fyptest"
     )
 
-    request = EvaluationRequest(enable_plagiarism=False, enable_grammar=True)
+    request = EvaluationRequest(enable_plagiarism=True, enable_grammar=True, enable_ai_detection=True)
 
     # Get a new database session
     db = next(get_db())
@@ -163,6 +380,6 @@ if __name__ == "__main__":
         evaluator.run(pdf_files=[
             "/home/samadpls/proj/fyp/smart-assess-backend/37.pdf",
             "/home/samadpls/proj/fyp/smart-assess-backend/p1.pdf"
-        ], total_grade=3, submission_ids=[1, 2])
+        ], total_grade=100, submission_ids=[1, 2])
     finally:
         db.close()
