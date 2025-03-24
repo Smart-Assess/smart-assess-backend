@@ -1,11 +1,9 @@
+
 # >> Import necessary modules and packages from FastAPI and other libraries
 import json
-import re
-from pydantic import BaseModel
 from tempfile import NamedTemporaryFile
-from uuid import uuid4
+import time
 from evaluations.assignment_evaluator import AssignmentEvaluator
-from utils.mongodb import mongo_db
 from fastapi import (
     APIRouter,
     Depends,
@@ -19,482 +17,22 @@ from apis.auth import get_current_admin
 from models.models import *
 from models.pydantic_model import EvaluationRequest
 from utils.dependencies import get_db
-from typing import List, Optional
-from bestrag import BestRAG
+from typing import Optional
 from utils.s3 import delete_from_s3, download_from_s3, upload_to_s3
-# from utils.security import get_password_hash
-from bson import ObjectId
+from apis.teacher_course import sanitize_folder_name, get_teacher_rag, db_mongo, JSONEncoder
 import json
-from fastapi import Body
 from evaluations.base_extractor import PDFQuestionAnswerExtractor   
 from fastapi import APIRouter, UploadFile, Form, File, HTTPException, Depends
-from utils.converter import convert_ppt_to_pdf
 
-class JSONEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, ObjectId):
-            return str(o)
-        if isinstance(o, datetime):
-            return o.isoformat()
-        return super().default(o)
 
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-db_mongo = mongo_db.db
-
-teacher_rag_cache = {}
 # >> Define the router for the API
-def generate_collection_name(teacher_id: int, course_name: str) -> str:
-    """Generate unique collection name for course"""
-    sanitized_name = re.sub(r'[^a-zA-Z0-9]', '_', course_name.lower())
-    unique_id = str(uuid4())[:8]
-    return f"teacher_{teacher_id}_{sanitized_name}_{unique_id}"
-
-def get_teacher_rag(collection_name: str) -> BestRAG:
-    """Get or create BestRAG instance using collection name"""
-    if collection_name not in teacher_rag_cache:
-        teacher_rag_cache[collection_name] = BestRAG(
-            url=os.getenv("QDRANT_URL"),
-            api_key=os.getenv("QDRANT_API_KEY"),
-            collection_name=collection_name
-        )
-    return teacher_rag_cache[collection_name]
-
-def sanitize_folder_name(name: str) -> str:
-    """Replace spaces and special characters in folder names"""
-    return name.replace(' ', '_').strip()
 
 router = APIRouter()
-
-@router.post("/teacher/course", response_model=dict)
-async def create_course(
-    name: str = Form(...),
-    batch: str = Form(...),
-    group: str = Form(...),
-    section: str = Form(...),
-    status: str = Form(...),
-    files: List[UploadFile] = File(None),
-    db: Session = Depends(get_db),
-    current_teacher: Teacher = Depends(get_current_admin),
-):
-    collection_name = generate_collection_name(current_teacher.id, name)
-    new_course = Course(
-        name=name,
-        batch=batch,
-        group=group,
-        section=section,
-        status=status,
-        pdf_urls=json.dumps([]),
-        teacher_id=current_teacher.id,
-        collection_name=collection_name,
-    )
-    
-    db.add(new_course)
-    db.commit()
-    db.refresh(new_course)
-
-    rag = get_teacher_rag(collection_name)
-    pdf_urls = []
-
-    if files:
-        temp_dir = "temp"
-        os.makedirs(temp_dir, exist_ok=True)
-
-        for file in files:
-            ext = file.filename.split('.')[-1].lower()
-            if ext not in ['pdf', 'ppt', 'pptx']:
-                raise HTTPException(status_code=400, detail=f"File {file.filename} must be a PDF or PPT")
-
-            file_path = os.path.join(temp_dir, file.filename)
-            with open(file_path, "wb") as buffer:
-                buffer.write(await file.read())
-
-            
-            if ext in ["ppt", "pptx"]:
-                converted_pdf_path = convert_ppt_to_pdf(file_path)
-                os.remove(file_path)  
-                file_path = converted_pdf_path  
-
-           
-            pdf_url = upload_to_s3(
-                folder_name=f"course_pdfs/{current_teacher.id}",
-                file_name=f"{new_course.id}_{os.path.basename(file_path)}",
-                file_path=file_path
-            )
-
-            if pdf_url:
-                try:
-                    rag.store_pdf_embeddings(file_path, pdf_url)
-                except Exception as e:
-                    print(f"Failed to store embeddings: {e}")
-
-                pdf_urls.append(pdf_url)
-            else:
-                raise HTTPException(status_code=500, detail=f"Failed to upload file {file.filename}")
-
-            os.remove(file_path)  # Clean up the temporary converted PDF
-
-    new_course.pdf_urls = json.dumps(pdf_urls)
-    db.commit()
-    db.refresh(new_course)
-
-    return {
-        "success": True,
-        "status": 201,
-        "course": {
-            "id": new_course.id,
-            "name": new_course.name,
-            "course_code": new_course.course_code,
-            "batch": new_course.batch,
-            "group": new_course.group,
-            "section": new_course.section,
-            "status": new_course.status,
-            "pdf_urls": json.loads(new_course.pdf_urls)
-        }
-    }
-
-    
-@router.get("/teacher/course/{course_id}", response_model=dict)
-async def get_course(
-    course_id: int,
-    db: Session = Depends(get_db),
-    current_teacher: Teacher = Depends(get_current_admin)
-):
-    course = db.query(Course).filter(
-        Course.id == course_id,
-        Course.teacher_id == current_teacher.id
-    ).first()
-    
-    if not course:
-        raise HTTPException(
-            status_code=404,
-            detail="Course not found or you don't have access"
-        )
-    print(course.collection_name)
-    return {
-        "success": True,
-        "status": 200,
-        "course": {
-            "id": course.id,
-            "name": course.name,
-            "batch": course.batch,
-            "group": course.group,
-            "section": course.section,
-            "status": course.status,
-            "course_code": course.course_code,
-            "pdf_urls": json.loads(course.pdf_urls),
-            "created_at": course.created_at
-        }
-    }
-
-@router.put("/teacher/course/{course_id}/regenerate-code", response_model=dict)
-async def regenerate_course_code(
-    course_id: int,
-    db: Session = Depends(get_db),
-    current_teacher: Teacher = Depends(get_current_admin)
-):
-    course = db.query(Course).filter(
-        Course.id == course_id,
-        Course.teacher_id == current_teacher.id
-    ).first()
-    
-    if not course:
-        raise HTTPException(
-            status_code=404,
-            detail="Course not found or you don't have access"
-        )
-
-    while True:
-        new_code = generate_course_code()
-        exists = db.query(Course).filter(Course.course_code == new_code).first()
-        if not exists:
-            break
-
-    course.course_code = new_code
-    db.commit()
-    db.refresh(course)
-
-    return {
-        "success": True,
-        "status": 201,
-        "message": "Course code regenerated successfully",
-        "new_code": course.course_code
-    }
-@router.get("/teacher/courses", response_model=dict)
-async def get_teacher_courses(
-    page: int = 1,
-    limit: int = 10,
-    db: Session = Depends(get_db),
-    current_teacher: Teacher = Depends(get_current_admin)
-):
-    # Calculate offset for pagination
-    offset = (page - 1) * limit
-    
-    # Get total count of courses
-    total = db.query(Course)\
-        .filter(Course.teacher_id == current_teacher.id)\
-        .count()
-
-    # Get paginated courses
-    courses = db.query(Course)\
-        .filter(Course.teacher_id == current_teacher.id)\
-        .order_by(Course.created_at.desc())\
-        .offset(offset)\
-        .limit(limit)\
-        .all()
-    
-    # Format course data
-    courses_data = [
-        {
-            "id": course.id,
-            "name": course.name,
-            "batch": course.batch,
-            "group": course.group,
-            "section": course.section,
-            "course_code": course.course_code,
-            "status": course.status,
-            "created_at": course.created_at.strftime("%Y-%m-%d %H:%M")
-        }
-        for course in courses
-    ]
-
-    return {
-        "success": True,
-        "status": 200,
-        "total": total,
-        "page": page,
-        "total_pages": (total + limit - 1) // limit,
-        "courses": courses_data,
-        "has_previous": page > 1,
-        "has_next": (offset + limit) < total
-    }
-
-class CourseUpdateRequest(BaseModel):
-    removed_pdfs: Optional[List[str]] = None
-    name: Optional[str] = None
-    batch: Optional[str] = None
-    group: Optional[str] = None
-    section: Optional[str] = None
-    status: Optional[str] = None
-
-@router.put("/teacher/course/{course_id}", response_model=dict)
-async def update_course(
-    course_id: int,
-    name: Optional[str] = Form(None),
-    batch: Optional[str] = Form(None),
-    group: Optional[str] = Form(None),
-    section: Optional[str] = Form(None),
-    status: Optional[str] = Form(None),
-    removed_pdfs: Optional[str] = Form(None),  # JSON string of URLs to remove
-    pdfs: List[UploadFile] = File([]),  # Default to empty list for optional files
-    db: Session = Depends(get_db),
-    current_teacher: Teacher = Depends(get_current_admin),
-):
-    """
-    Update a course with optional fields:
-    - course information (name, batch, group, section, status)
-    - new PDF materials to upload
-    - existing PDF materials to remove
-    
-    All fields are optional except course_id.
-    """
-    # Find the course to update
-    course = db.query(Course).filter(
-        Course.id == course_id,
-        Course.teacher_id == current_teacher.id
-    ).first()
-
-    if not course:
-        raise HTTPException(status_code=404, detail="Course not found")
-    
-    # Update basic course information if provided
-    if name is not None: 
-        course.name = name.strip()
-    if batch is not None: 
-        course.batch = batch.strip()
-    if group is not None: 
-        course.group = group.strip()
-    if section is not None: 
-        course.section = section.strip()
-    if status is not None: 
-        course.status = status.strip()
-
-    try:
-        # Initialize PDF management variables
-        existing_urls = json.loads(course.pdf_urls) if course.pdf_urls else []
-        rag = get_teacher_rag(course.collection_name)
-        updated_urls = existing_urls.copy()  # Start with existing PDFs
-        
-        # 1. Handle removal of PDFs if requested
-        if removed_pdfs:
-            # Parse the JSON string to get the list of URLs to remove
-            removed_pdf_urls = json.loads(removed_pdfs)
-            
-            for url in removed_pdf_urls:
-                if url in updated_urls:
-                    # Try to delete from S3
-                    if delete_from_s3(url):
-                        try:
-                            # Try to delete from RAG embeddings
-                            rag.delete_pdf_embeddings(url)
-                        except Exception as e:
-                            print(f"Warning: Failed to delete embeddings for {url}: {e}")
-                        # Remove from our list whether or not embeddings deletion worked
-                        updated_urls.remove(url)
-                    else:
-                        # S3 deletion failed, log but don't halt execution
-                        print(f"Warning: Failed to delete PDF from S3: {url}")
-        
-        # 2. Handle new PDF uploads
-        if pdfs:
-            folder_name = f"course_pdfs/{current_teacher.id}"
-            
-            for pdf in pdfs:
-                if not pdf.filename:  # Skip empty files
-                    continue
-                    
-                # Validate the PDF file
-                if not pdf.content_type == 'application/pdf':
-                    raise HTTPException(
-                        status_code=400, 
-                        detail=f"File {pdf.filename} must be a PDF"
-                    )
-                
-                # Save to temporary file
-                temp_file = NamedTemporaryFile(delete=False, suffix=".pdf")
-                try:
-                    # Write contents to temp file
-                    content = await pdf.read()
-                    temp_file.write(content)
-                    temp_file.close()
-                    
-                    # Upload to S3
-                    s3_key = f"{course.id}_{pdf.filename}"
-                    pdf_url = upload_to_s3(
-                        folder_name=folder_name,
-                        file_name=s3_key,
-                        file_path=temp_file.name
-                    )
-                    
-                    if pdf_url:
-                        # Add to embeddings and URL list
-                        try:
-                            rag.store_pdf_embeddings(temp_file.name, pdf_url)
-                        except Exception as e:
-                            print(f"Warning: Failed to store embeddings for {pdf_url}: {e}")
-                        updated_urls.append(pdf_url)
-                    else:
-                        raise HTTPException(
-                            status_code=500,
-                            detail=f"Failed to upload PDF {pdf.filename}"
-                        )
-                finally:
-                    # Clean up the temp file
-                    if os.path.exists(temp_file.name):
-                        os.remove(temp_file.name)
-        
-        # 3. Update the course with new PDF URLs
-        course.pdf_urls = json.dumps(updated_urls)
-        
-        # 4. Commit changes to database
-        db.commit()
-        db.refresh(course)
-        
-        # 5. Return success response
-        return {
-            "success": True,
-            "status": 200,
-            "message": "Course updated successfully",
-            "course": {
-                "id": course.id,
-                "name": course.name,
-                "batch": course.batch,
-                "group": course.group,
-                "section": course.section,
-                "status": course.status,
-                "course_code": course.course_code,
-                "pdf_urls": json.loads(course.pdf_urls)
-            }
-        }
-        
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating course: {str(e)}")
-@router.delete("/teacher/course/{course_id}", response_model=dict)
-async def delete_course(
-    course_id: int,
-    db: Session = Depends(get_db),
-    current_teacher: Teacher = Depends(get_current_admin),
-):
-    """
-    Delete a course and all its associated resources:
-    - Course record in database
-    - PDF files in S3 bucket
-    - RAG embeddings
-
-    Returns:
-        dict: Response with success status and message
-    """
-    # Find the course to delete
-    course = db.query(Course).filter(
-        Course.id == course_id,
-        Course.teacher_id == current_teacher.id
-    ).first()
-
-    if not course:
-        raise HTTPException(status_code=404, detail="Course not found")
-
-    try:
-        # 1. Delete PDF files from S3
-        pdf_urls = json.loads(course.pdf_urls) if course.pdf_urls else []
-        deleted_files = []
-        failed_files = []
-        
-        for url in pdf_urls:
-            if delete_from_s3(url):
-                deleted_files.append(url)
-            else:
-                failed_files.append(url)
-
-        # 2. Delete RAG embeddings associated with the course
-        try:
-            rag = get_teacher_rag(course.collection_name)
-            # Delete all embeddings associated with this course
-            for url in pdf_urls:
-                try:
-                    rag.delete_pdf_embeddings(url)
-                except Exception as e:
-                    print(f"Warning: Failed to delete embeddings for {url}: {e}")
-        except Exception as e:
-            print(f"Warning: Failed to delete RAG collection: {e}")
-
-        # 3. Delete assignments associated with this course
-        assignments = db.query(Assignment).filter(Assignment.course_id == course_id).all()
-        for assignment in assignments:
-            db.delete(assignment)
-
-        # 4. Delete the course record from the database
-        db.delete(course)
-        db.commit()
-
-        # 5. Return success response with details
-        return {
-            "success": True,
-            "status": 200,
-            "message": "Course deleted successfully",
-            "details": {
-                "course_id": course_id,
-                "deleted_files": deleted_files,
-                "failed_files": failed_files
-            }
-        }
-        
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting course: {str(e)}")
 
 @router.get("/teacher/assignments", response_model=dict)
 async def get_teacher_assignments(
@@ -901,112 +439,6 @@ async def get_assignment(
         }
     }
 
-@router.get("/teacher/course/{course_id}/requests", response_model=dict)
-async def get_course_requests(
-    course_id: int,
-    db: Session = Depends(get_db),
-    current_teacher: Teacher = Depends(get_current_admin)
-):
-    course = db.query(Course).filter(
-        Course.id == course_id,
-        Course.teacher_id == current_teacher.id
-    ).first()
-    
-    if not course:
-        raise HTTPException(
-            status_code=404,
-            detail="Course not found or you don't have access"
-        )
-
-    # Get all pending requests with student info
-    requests = db.query(StudentCourse, Student)\
-        .join(Student)\
-        .filter(
-            StudentCourse.course_id == course_id,
-            StudentCourse.status == "pending"
-        ).all()
-    
-    requests_data = []
-    for request, student in requests:
-        requests_data.append({
-            "request_id": request.id,
-            "status": request.status,
-            "created_at": request.created_at,
-            "student": {
-                "id": student.id,
-                "department":student.department,
-                "name": student.full_name,
-                "email": student.email,
-                "batch": student.batch,
-                "section": student.section
-            }
-        })
-
-    return {
-        "success": True,
-        "status": 200,
-        "course_id": course_id,
-        "requests": requests_data
-    }
-
-@router.put("/teacher/course/{course_id}/request/{request_id}", response_model=dict)
-async def update_course_request(
-    course_id: int,
-    request_id: int,
-    status: str = Form(...),  # accepted or rejected
-    db: Session = Depends(get_db),
-    current_teacher: Teacher = Depends(get_current_admin)
-):
-    # Validate status
-    if status not in ["accepted", "rejected"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Status must be 'accepted' or 'rejected'"
-        )
-
-    # Verify course ownership
-    course = db.query(Course).filter(
-        Course.id == course_id,
-        Course.teacher_id == current_teacher.id
-    ).first()
-    
-    if not course:
-        raise HTTPException(
-            status_code=404,
-            detail="Course not found or you don't have access"
-        )
-
-    # Get request
-    join_request = db.query(StudentCourse).filter(
-        StudentCourse.id == request_id,
-        StudentCourse.course_id == course_id,
-        StudentCourse.status == "pending"
-    ).first()
-    
-    if not join_request:
-        raise HTTPException(
-            status_code=404,
-            detail="Request not found or already processed"
-        )
-
-    # Update status
-    join_request.status = status
-    db.commit()
-    db.refresh(join_request)
-
-    return {
-        "success": True,
-        "status": 200,
-        "message": f"Request {status} successfully",
-        "request": {
-            "id": join_request.id,
-            "status": join_request.status,
-            "course_id": join_request.course_id,
-            "student_id": join_request.student_id,
-            "created_at": join_request.created_at
-        }
-    }
-
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}/submissions", response_model=dict)
 async def get_assignment_submissions(
     course_id: int,
@@ -1094,7 +526,6 @@ async def evaluate_submissions(
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
 ):
-
     evaluation_results = []
     temp_files = []
 
@@ -1154,28 +585,97 @@ async def evaluate_submissions(
 
             # Initialize AssignmentEvaluator
             evaluator = AssignmentEvaluator(course_id=course_id, assignment_id=assignment_id, request=request, rag=rag, db=db)
+            
+            # Print evaluation configuration for debugging
+            print(f"Evaluation configuration: AI detection: {request.enable_ai_detection}, Grammar: {request.enable_grammar}, Plagiarism: {request.enable_plagiarism}")
+            
+            # Run evaluation
             evaluator.run(pdf_files=pdf_files, total_grade=assignment.grade, submission_ids=submission_ids)
+            
+            # Wait briefly to ensure MongoDB updates have completed
+            time.sleep(0.3)
 
-            # Collect evaluation results
-            for submission in submissions:
-                submission_data = mongo_db.db['evaluation_results'].find_one({
+            # Collect evaluation results with proper feedback handling
+            for submission_id, temp_path in submission_paths.items():
+                # We need to find the evaluation by the submission_id
+                submission_data = db_mongo.evaluation_results.find_one({
                     "course_id": course_id,
                     "assignment_id": assignment_id,
-                    "pdf_file": submission.submission_pdf_url
+                    "submission_id": submission_id
                 })
 
                 if submission_data:
+                    # Find the submission and student
+                    submission = db.query(AssignmentSubmission).filter(
+                        AssignmentSubmission.id == submission_id
+                    ).first()
+                    
+                    if not submission:
+                        continue
+                    
                     student = db.query(Student).filter(Student.id == submission.student_id).first()
-                    evaluation_results.append({
+                    if not student:
+                        continue
+                    
+                    # Extract scores properly with defaults
+                    overall_scores = submission_data.get("overall_scores", {})
+                    
+                    # Extract feedback with proper fallback
+                    feedback_data = submission_data.get("overall_feedback", {})
+                    feedback_content = ""
+                    if isinstance(feedback_data, dict):
+                        feedback_content = feedback_data.get("content", "")
+                    elif isinstance(feedback_data, str):
+                        feedback_content = feedback_data
+                    
+                    # Debug output
+                    print(f"Submission ID {submission_id} - Overall scores: {overall_scores}")
+                    print(f"Submission ID {submission_id} - Feedback: {feedback_content}")
+                    
+                    result = {
                         "name": student.full_name,
                         "batch": student.batch,
                         "department": student.department,
                         "section": student.section,
-                        "total_score": submission_data.get("overall_scores", {}).get("total", {}).get("score", 0),
-                        "avg_context_score": submission_data.get("overall_scores", {}).get("context", {}).get("score", 0),
-                        "avg_plagiarism_score": submission_data.get("overall_scores", {}).get("plagiarism", {}).get("score", 0),
+                        "total_score": overall_scores.get("total", {}).get("score", 0),
+                        "avg_context_score": overall_scores.get("context", {}).get("score", 0),
+                        "avg_plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0),
+                        "avg_ai_score": overall_scores.get("ai_detection", {}).get("score", 0),
+                        "avg_grammar_score": overall_scores.get("grammar", {}).get("score", 0),
+                        "feedback": feedback_content,
                         "image": student.image_url
-                    })
+                    }
+                    
+                    # Add result to list
+                    evaluation_results.append(result)
+                    
+                    # Update PostgreSQL record for compatibility
+                    existing_eval = db.query(AssignmentEvaluation).filter(
+                        AssignmentEvaluation.submission_id == submission_id
+                    ).first()
+                    
+                    if existing_eval:
+                        # Update existing evaluation
+                        existing_eval.total_score = overall_scores.get("total", {}).get("score", 0)
+                        existing_eval.plagiarism_score = overall_scores.get("plagiarism", {}).get("score", 0)
+                        existing_eval.ai_detection_score = overall_scores.get("ai_detection", {}).get("score", 0)
+                        existing_eval.grammar_score = overall_scores.get("grammar", {}).get("score", 0)
+                        existing_eval.feedback = feedback_content
+                        existing_eval.updated_at = datetime.now()
+                    else:
+                        # Create new evaluation record
+                        new_eval = AssignmentEvaluation(
+                            submission_id=submission_id,
+                            total_score=overall_scores.get("total", {}).get("score", 0),
+                            plagiarism_score=overall_scores.get("plagiarism", {}).get("score", 0),
+                            ai_detection_score=overall_scores.get("ai_detection", {}).get("score", 0),
+                            grammar_score=overall_scores.get("grammar", {}).get("score", 0),
+                            feedback=feedback_content
+                        )
+                        db.add(new_eval)
+                    
+                    # Commit changes
+                    db.commit()
 
         finally:
             # Cleanup temp files
@@ -1190,7 +690,9 @@ async def evaluate_submissions(
         print(f"Evaluation failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
 
-    print("Evaluation completed", evaluation_results)
+    # Print full results for debugging
+    print("Evaluation results:", json.dumps(evaluation_results, indent=2))
+    
     return {
         "success": True,
         "status": 200,
@@ -1240,32 +742,42 @@ async def get_submission_details(
             detail="Submission not found"
         )
 
-    
-    # Check both submissions and assignment_evaluations collections
-    submission_data = None
-    
-    # First check submissions collection
-    submission_data = db_mongo.submissions.find_one({
+    # First check evaluation_results collection
+    submission_data = db_mongo.evaluation_results.find_one({
         "course_id": course_id,
         "assignment_id": assignment_id,
-        "student_id": submission.student_id,
-        "PDF_File": submission.submission_pdf_url
+        "pdf_file": submission.submission_pdf_url
     })
 
     if not submission_data:
-        # Try assignment_evaluations collection
-        submission_data = db_mongo.assignment_evaluations.find_one({
-            "course_id": course_id,
-            "assignment_id": assignment_id,
-            "student_id": submission.student_id,
-            "submission_id": submission_id
-        })
-
-    if not submission_data:
-        raise HTTPException(
-            status_code=404,
-            detail="Submission details not found in MongoDB"
-        )
+        # Check PostgreSQL database for evaluation data
+        evaluation = db.query(AssignmentEvaluation).filter(
+            AssignmentEvaluation.submission_id == submission_id
+        ).first()
+        
+        if evaluation:
+            # Create minimal response with PostgreSQL data
+            submission_data = {
+                "course_id": course_id,
+                "assignment_id": assignment_id,
+                "submission_id": submission_id,
+                "pdf_file": submission.submission_pdf_url,
+                "overall_scores": {
+                    "total": {"score": float(evaluation.total_score or 0.0)},
+                    "plagiarism": {"score": float(evaluation.plagiarism_score or 0.0)},
+                    "ai_detection": {"score": float(evaluation.ai_detection_score or 0.0)},
+                    "grammar": {"score": float(evaluation.grammar_score or 0.0)}
+                },
+                "overall_feedback": {
+                    "content": evaluation.feedback or "",
+                    "generated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else ""
+                }
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Submission details not found"
+            )
 
     # Convert MongoDB document to serializable format
     serializable_data = json.loads(json.dumps(submission_data, cls=JSONEncoder))
@@ -1313,15 +825,18 @@ async def get_total_scores(
     try:
         total_scores_data = []
         for submission, student in submissions:
-            submission_data = db_mongo.submissions.find_one({
+            # First try to find evaluation results in MongoDB
+            evaluation_data = db_mongo.evaluation_results.find_one({
                 "course_id": course_id,
                 "assignment_id": assignment_id,
-                "student_id": submission.student_id,
-                "PDF_File": submission.submission_pdf_url
+                "pdf_file": submission.submission_pdf_url
             })
 
-            if submission_data:
-                # Clean up scores data
+            if evaluation_data:
+                # Get total score and overall scores from evaluation results
+                overall_scores = evaluation_data.get("overall_scores", {})
+                feedback = evaluation_data.get("overall_feedback", {}).get("content", "")
+                
                 scores = {
                     "student_id": student.student_id,
                     "name": student.full_name,
@@ -1329,26 +844,38 @@ async def get_total_scores(
                     "department": student.department,
                     "section": student.section,
                     "image": student.image_url,
-                    "total_score": submission_data.get("total_score", 0.0),
-                    "avg_context_score": 0.0,
-                    "avg_plagiarism_score": 0.0
+                    "total_score": overall_scores.get("total", {}).get("score", 0.0),
+                    "avg_context_score": overall_scores.get("context", {}).get("score", 0.0),
+                    "avg_plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0.0),
+                    "avg_ai_score": overall_scores.get("ai_detection", {}).get("score", 0.0),
+                    "avg_grammar_score": overall_scores.get("grammar", {}).get("score", 0.0),
+                    "feedback": feedback
                 }
 
-                # Calculate average context score and average plagiarism score
-                if "questions" in submission_data:
-                    total_context_score = 0.0
-                    total_plagiarism_score = 0.0
-                    num_questions = len(submission_data["questions"])
-
-                    for question in submission_data["questions"]:
-                        total_context_score += question.get("context_score", 0.0)
-                        total_plagiarism_score += question.get("plagiarism_score", 0.0)
-
-                    if num_questions > 0:
-                        scores["avg_context_score"] = round(total_context_score / num_questions, 4)
-                        scores["avg_plagiarism_score"] = round(total_plagiarism_score / num_questions, 4)
-
                 total_scores_data.append(scores)
+            else:
+                # Fall back to checking PostgreSQL database
+                evaluation = db.query(AssignmentEvaluation).filter(
+                    AssignmentEvaluation.submission_id == submission.id
+                ).first()
+                
+                if evaluation:
+                    scores = {
+                        "student_id": student.student_id,
+                        "name": student.full_name,
+                        "batch": student.batch,
+                        "department": student.department,
+                        "section": student.section,
+                        "image": student.image_url,
+                        "total_score": float(evaluation.total_score or 0.0),
+                        "avg_context_score": 0.0,  # Not stored in older format
+                        "avg_plagiarism_score": float(evaluation.plagiarism_score or 0.0),
+                        "avg_ai_score": float(evaluation.ai_detection_score or 0.0),
+                        "avg_grammar_score": float(evaluation.grammar_score or 0.0),
+                        "feedback": evaluation.feedback or ""
+                    }
+                    
+                    total_scores_data.append(scores)
 
         return {
             "success": True,
@@ -1358,3 +885,172 @@ async def get_total_scores(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scores: {str(e)}")
+
+@router.get("/teacher/course/{course_id}/assignment/{assignment_id}/student/{student_id}/evaluation", response_model=dict)
+async def get_student_evaluation(
+    course_id: int,
+    assignment_id: int,
+    student_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin)
+):
+    """
+    Get detailed evaluation for a specific student's assignment submission,
+    including per-question scores, overall scores, and feedback.
+    """
+    # Verify course and assignment ownership
+    course = db.query(Course).filter(
+        Course.id == course_id,
+        Course.teacher_id == current_teacher.id
+    ).first()
+
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found or you don't have access"
+        )
+
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.course_id == course_id
+    ).first()
+
+    if not assignment:
+        raise HTTPException(
+            status_code=404,
+            detail="Assignment not found"
+        )
+
+    # Find the student's submission
+    submission = db.query(AssignmentSubmission).filter(
+        AssignmentSubmission.assignment_id == assignment_id,
+        AssignmentSubmission.student_id == student_id
+    ).first()
+
+    if not submission:
+        raise HTTPException(
+            status_code=404,
+            detail="No submission found for this student"
+        )
+
+    # Get student details
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(
+            status_code=404,
+            detail="Student not found"
+        )
+
+    # Get evaluation data from MongoDB
+    evaluation_data = db_mongo.evaluation_results.find_one({
+        "course_id": course_id,
+        "assignment_id": assignment_id,
+        "pdf_file": submission.submission_pdf_url
+    })
+
+    if not evaluation_data:
+        # Check PostgreSQL database for evaluation data
+        evaluation = db.query(AssignmentEvaluation).filter(
+            AssignmentEvaluation.submission_id == submission.id
+        ).first()
+        
+        if not evaluation:
+            raise HTTPException(
+                status_code=404,
+                detail="No evaluation found for this submission"
+            )
+        
+        # Create a minimal response with PostgreSQL data
+        student_evaluation = {
+            "student": {
+                "id": student.id,
+                "student_id": student.student_id,
+                "name": student.full_name,
+                "batch": student.batch,
+                "department": student.department,
+                "section": student.section,
+                "image": student.image_url
+            },
+            "submission": {
+                "id": submission.id,
+                "submitted_at": submission.submitted_at.strftime("%I:%M %p - %d/%b/%Y"),
+                "pdf_url": submission.submission_pdf_url
+            },
+            "overall_scores": {
+                "total_score": float(evaluation.total_score or 0.0),
+                "plagiarism_score": float(evaluation.plagiarism_score or 0.0),
+                "ai_detection_score": float(evaluation.ai_detection_score or 0.0),
+                "grammar_score": float(evaluation.grammar_score or 0.0)
+            },
+            "overall_feedback": evaluation.feedback or "",
+            "questions": [],  # No per-question data available in older format
+            "evaluated_at": evaluation.updated_at.strftime("%I:%M %p - %d/%b/%Y") if evaluation.updated_at else ""
+        }
+        
+        return {
+            "success": True,
+            "status": 200,
+            "evaluation": student_evaluation
+        }
+    
+    # Process MongoDB data (full evaluation with per-question details)
+    overall_scores = evaluation_data.get("overall_scores", {})
+    questions_data = evaluation_data.get("questions", [])
+    
+    # Format questions data
+    formatted_questions = []
+    for question in questions_data:
+        q_num = question.get("question_number")
+        scores = question.get("scores", {})
+        feedback = question.get("feedback", {}).get("content", "")
+        
+        formatted_questions.append({
+            "question_number": q_num,
+            "question_text": question.get("question", ""),
+            "student_answer": question.get("answer", ""),
+            "scores": {
+                "context_score": scores.get("context", {}).get("score", 0.0),
+                "plagiarism_score": scores.get("plagiarism", {}).get("score", 0.0),
+                "ai_detection_score": scores.get("ai_detection", {}).get("score", 0.0),
+                "grammar_score": scores.get("grammar", {}).get("score", 0.0),
+                "total_score": scores.get("total", {}).get("score", 0.0)
+            },
+            "feedback": feedback
+        })
+    
+    # Build response
+    student_evaluation = {
+        "student": {
+            "id": student.id,
+            "student_id": student.student_id,
+            "name": student.full_name,
+            "batch": student.batch,
+            "department": student.department,
+            "section": student.section,
+            "image": student.image_url
+        },
+        "submission": {
+            "id": submission.id,
+            "submitted_at": submission.submitted_at.strftime("%I:%M %p - %d/%b/%Y"),
+            "pdf_url": submission.submission_pdf_url
+        },
+        "overall_scores": {
+            "total_score": overall_scores.get("total", {}).get("score", 0.0),
+            "context_score": overall_scores.get("context", {}).get("score", 0.0),
+            "plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0.0),
+            "ai_detection_score": overall_scores.get("ai_detection", {}).get("score", 0.0),
+            "grammar_score": overall_scores.get("grammar", {}).get("score", 0.0)
+        },
+        "overall_feedback": evaluation_data.get("overall_feedback", {}).get("content", ""),
+        "questions": sorted(formatted_questions, key=lambda x: x["question_number"]),
+        "evaluated_at": evaluation_data.get("evaluated_at", "")
+    }
+    
+    # Convert MongoDB document to serializable format
+    serializable_data = json.loads(json.dumps(student_evaluation, cls=JSONEncoder))
+    
+    return {
+        "success": True,
+        "status": 200,
+        "evaluation": serializable_data
+    }
