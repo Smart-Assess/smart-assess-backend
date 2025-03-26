@@ -328,35 +328,67 @@ async def get_student_results(
             ).all()
 
             for evaluation in evaluations:
-                # Get MongoDB detailed results
-                submissions_collection = mongo_db.get_collection('submissions')
-                submission_data = submissions_collection.find_one({
+                # Get MongoDB detailed results from evaluation_results collection
+                evaluation_data = mongo_db.db['evaluation_results'].find_one({
+                    "course_id": submission.assignment.course_id,
                     "assignment_id": submission.assignment_id,
-                    "student_id": current_student.id,
-                    "PDF_File": submission.submission_pdf_url
+                    "submission_id": submission.id
                 })
 
-                if not submission_data:
+                if not evaluation_data:
                     continue
 
                 # Prepare detailed question results
                 detailed_questions = []
-                for question in submission_data.get("questions", []):
-                    detailed_questions.append({
-                        "question_number": question.get("question_number"),
-                        "question_text": question.get("question_text"),
-                        "student_answer": question.get("student_answer"),
-                        "plagiarism_score": question.get("plagiarism_score"),
-                        "context_score": question.get("context_score"),
-                        "ai_score": question.get("ai_score"),
-                        "grammar_score": question.get("grammar_score"),
-                        "feedback": question.get("feedback")
+                for question in evaluation_data.get("questions", []):
+                    q_num = question.get("question_number")
+                    scores = question.get("scores", {})
+                    feedback_obj = question.get("feedback", {})
+                    
+                    # Get question text and student answer from qa_extractions
+                    qa_data = mongo_db.db['qa_extractions'].find_one({
+                        "course_id": submission.assignment.course_id,
+                        "assignment_id": submission.assignment_id,
+                        "submission_id": submission.id,
+                        "is_teacher": False
                     })
+                    
+                    question_text = ""
+                    student_answer = ""
+                    if qa_data and "qa_pairs" in qa_data:
+                        qa_pairs = qa_data["qa_pairs"]
+                        question_text = qa_pairs.get(f"Question#{q_num}", "")
+                        student_answer = qa_pairs.get(f"Answer#{q_num}", "")
+                    
+                    feedback_content = ""
+                    if isinstance(feedback_obj, dict):
+                        feedback_content = feedback_obj.get("content", "")
+                    elif isinstance(feedback_obj, str):
+                        feedback_content = feedback_obj
+                    
+                    detailed_questions.append({
+                        "question_number": q_num,
+                        "question_text": question_text,
+                        "student_answer": student_answer,
+                        "plagiarism_score": scores.get("plagiarism", {}).get("score", 0),
+                        "context_score": scores.get("context", {}).get("score", 0),
+                        "ai_score": scores.get("ai_detection", {}).get("score", 0),
+                        "grammar_score": scores.get("grammar", {}).get("score", 0),
+                        "feedback": feedback_content
+                    })
+
+                # Get overall feedback
+                overall_feedback_obj = evaluation_data.get("overall_feedback", {})
+                overall_feedback = ""
+                if isinstance(overall_feedback_obj, dict):
+                    overall_feedback = overall_feedback_obj.get("content", "")
+                elif isinstance(overall_feedback_obj, str):
+                    overall_feedback = overall_feedback_obj
 
                 # Determine feedback
                 total_score = evaluation.total_score
-                feedback = evaluation.feedback
-                if total_score == 0 and any(q["context_score"] > 0 for q in detailed_questions):
+                feedback = overall_feedback or evaluation.feedback
+                if total_score == 0 and any(q["plagiarism_score"] > 0.7 for q in detailed_questions):
                     feedback = "Your total score is 0 because plagiarism was detected in your submission."
 
                 results_data.append({
@@ -406,40 +438,78 @@ async def get_assignment_result(
     ).first()
 
     try:
-        submissions_collection = mongo_db.get_collection('submissions')
-        submission_data = submissions_collection.find_one({
+        # Get MongoDB evaluation data
+        evaluation_data = mongo_db.db['evaluation_results'].find_one({
+            "course_id": submission.assignment.course_id,
             "assignment_id": assignment_id,
-            "student_id": current_student.id,
-            "PDF_File": submission.submission_pdf_url
+            "submission_id": submission.id
         })
 
-        if not submission_data:
+        if not evaluation_data:
             raise HTTPException(
                 status_code=404,
                 detail="Detailed evaluation results not found"
             )
 
-        # Convert MongoDB ObjectIds to strings
-        submission_data["_id"] = str(submission_data["_id"])
+        # Get question-answer data
+        qa_data = mongo_db.db['qa_extractions'].find_one({
+            "course_id": submission.assignment.course_id,
+            "assignment_id": assignment_id,
+            "submission_id": submission.id,
+            "is_teacher": False
+        })
+        
+        qa_pairs = {}
+        if qa_data:
+            qa_pairs = qa_data.get("qa_pairs", {})
 
         # Prepare detailed question results
         detailed_questions = []
-        for question in submission_data.get("questions", []):
+        for question in evaluation_data.get("questions", []):
+            q_num = question.get("question_number")
+            scores = question.get("scores", {})
+            
+            # Get feedback from the question data
+            feedback_obj = question.get("feedback", {})
+            feedback_content = ""
+            if isinstance(feedback_obj, dict):
+                feedback_content = feedback_obj.get("content", "")
+            elif isinstance(feedback_obj, str):
+                feedback_content = feedback_obj
+            
+            # Get question and answer text
+            q_key = f"Question#{q_num}"
+            a_key = f"Answer#{q_num}"
+            
             detailed_questions.append({
-                "question_number": question.get("question_number"),
-                "question_text": question.get("question_text"),
-                "student_answer": question.get("student_answer"),
-                "plagiarism_score": question.get("plagiarism_score"),
-                "context_score": question.get("context_score"),
-                "ai_score": question.get("ai_score"),
-                "grammar_score": question.get("grammar_score"),
-                "feedback": question.get("feedback")
+                "question_number": q_num,
+                "question_text": qa_pairs.get(q_key, ""),
+                "student_answer": qa_pairs.get(a_key, ""),
+                "plagiarism_score": scores.get("plagiarism", {}).get("score", 0),
+                "context_score": scores.get("context", {}).get("score", 0),
+                "ai_score": scores.get("ai_detection", {}).get("score", 0),
+                "grammar_score": scores.get("grammar", {}).get("score", 0),
+                "feedback": feedback_content
             })
 
-        # Determine feedback
-        total_score = submission_data.get("total_score", "Not evaluated")
-        feedback = evaluation.feedback if evaluation else None
-        if total_score == 0 and any(q["context_score"] > 0 for q in detailed_questions):
+        # Get overall scores
+        overall_scores = evaluation_data.get("overall_scores", {})
+        total_score = overall_scores.get("total", {}).get("score", 0) if overall_scores else 0
+        
+        # Get overall feedback
+        overall_feedback_obj = evaluation_data.get("overall_feedback", {})
+        feedback = ""
+        if isinstance(overall_feedback_obj, dict):
+            feedback = overall_feedback_obj.get("content", "")
+        elif isinstance(overall_feedback_obj, str):
+            feedback = overall_feedback_obj
+        
+        # Use SQL evaluation feedback as fallback
+        if not feedback and evaluation:
+            feedback = evaluation.feedback
+            
+        # Override with plagiarism warning if applicable
+        if total_score == 0 and any(q["plagiarism_score"] > 0.7 for q in detailed_questions):
             feedback = "Your total score is 0 because plagiarism was detected in your submission."
 
         result_data = {
@@ -450,9 +520,9 @@ async def get_assignment_result(
             "questions": detailed_questions,
             "feedback": feedback,
             "scores": {
-                "plagiarism": evaluation.plagiarism_score if evaluation else None,
-                "ai_detection": evaluation.ai_detection_score if evaluation else None,
-                "grammar": evaluation.grammar_score if evaluation else None
+                "plagiarism": overall_scores.get("plagiarism", {}).get("score", 0) if overall_scores else (evaluation.plagiarism_score if evaluation else None),
+                "ai_detection": overall_scores.get("ai_detection", {}).get("score", 0) if overall_scores else (evaluation.ai_detection_score if evaluation else None),
+                "grammar": overall_scores.get("grammar", {}).get("score", 0) if overall_scores else (evaluation.grammar_score if evaluation else None)
             }
         }
 
@@ -473,6 +543,7 @@ async def get_assignment_result(
             status_code=500, 
             detail=f"Failed to fetch evaluation results: {str(e)}"
         )
+ 
     
 @router.get("/student/assignment/{assignment_id}", response_model=dict)
 async def get_assignment_details(
