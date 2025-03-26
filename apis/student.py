@@ -217,6 +217,7 @@ async def submit_assignment(
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
 
+
 @router.delete("/student/assignment/{assignment_id}/submission", response_model=dict)
 async def delete_submission(
     assignment_id: int,
