@@ -36,12 +36,16 @@ class GrammarChecker:
         self.headers = {"Authorization": f"Bearer {self.api_tokens[self.current_token_index]}"}
         logger.info(f"Switched to API token {self.current_token_index + 1}")
     
-    def query_api(self, text, attempt=0):
+    def query_api(self, text, attempt=0, delay=0):
         """Query the grammar correction API with error handling"""
         if attempt >= self.max_retries:
             logger.warning("Maximum retries reached for grammar API, using default score")
             self.service_available = False
             return None
+        
+        # Apply rate limiting delay
+        if delay > 0:
+            time.sleep(delay)
             
         try:
             response = requests.post(
@@ -83,7 +87,7 @@ class GrammarChecker:
             self._rotate_token()
             return self.query_api(text, attempt + 1)
     
-    def evaluate(self, text):
+    def evaluate(self, text, delay=0):
         """Evaluate text for grammar correctness"""
         if not text or len(text.strip()) < 10:
             return text, 1.0  # Perfect score for very short text
@@ -95,9 +99,9 @@ class GrammarChecker:
             logger.info(f"Grammar service unavailable, using simulated score: {simulated_score}")
             return text, simulated_score
             
-        # Try to get correction from API
+        # Try to get correction from API with delay
         logger.info(f"Checking grammar for text of length {len(text)}")
-        result = self.query_api(text[:1000])  # Limit length to avoid timeouts
+        result = self.query_api(text[:1000], delay=delay) 
         
         if result is None:
             # API failed, provide a reasonable high score as default
