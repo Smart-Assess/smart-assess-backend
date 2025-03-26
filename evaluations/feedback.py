@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 from pymongo import UpdateOne
@@ -20,6 +21,9 @@ class FeedbackGenerator:
         self.groq_api_key = os.getenv("GROQ_API_KEY", "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")
         self.client = Groq(api_key=self.groq_api_key, timeout=2.0)
         self.model = "llama3-8b-8192"
+        
+        # Default delay between API calls (in seconds)
+        self.default_delay = 1.0
         
         # Prompt templates - updated to include question and answer content
         self.question_prompt = """Provide brief, constructive feedback (2-3 sentences only) for this student's answer.
@@ -73,8 +77,12 @@ Target 1-2 key areas for improvement based on the weakest scores."""
         return teacher_data.get("qa_pairs", {})
     
     def generate_question_feedback(self, q_num: int, scores: Dict[str, Any], 
-                                  question_text: str, student_answer: str) -> str:
+                                  question_text: str, student_answer: str, delay: float = None) -> str:
         """Generate concise feedback for a specific question using Groq directly"""
+        # Apply delay to avoid rate limiting
+        delay = delay if delay is not None else self.default_delay
+        time.sleep(delay)
+        
         # Format the prompt with score values and question/answer content
         formatted_prompt = self.question_prompt.format(
             question_text=question_text,
@@ -85,22 +93,44 @@ Target 1-2 key areas for improvement based on the weakest scores."""
             grammar_score=scores.get("grammar", {}).get("score", "N/A")
         )
         
-        # Call Groq API
-        response = self.client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "You are a helpful educational assistant providing very brief, actionable feedback. Limit your response to 2-3 sentences maximum."},
-                {"role": "user", "content": formatted_prompt}
-            ],
-            model=self.model,
-            timeout=2.0,
-        )
-        
-        # Extract response content
-        feedback = response.choices[0].message.content.strip()
-        return feedback
+        try:
+            # Call Groq API with exponential backoff retry
+            max_retries = 3
+            retry_delay = delay
+            
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": "You are a helpful educational assistant providing very brief, actionable feedback. Limit your response to 2-3 sentences maximum."},
+                            {"role": "user", "content": formatted_prompt}
+                        ],
+                        model=self.model,
+                        timeout=2.0,
+                    )
+                    
+                    # Extract response content
+                    feedback = response.choices[0].message.content.strip()
+                    return feedback
+                    
+                except Exception as e:
+                    print(f"Error calling Groq API (attempt {attempt+1}/{max_retries}): {str(e)}")
+                    if attempt < max_retries - 1:
+                        print(f"Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Double the delay for next retry (exponential backoff)
+                    else:
+                        return "Feedback generation failed. Please review the scores manually."
+        except Exception as e:
+            print(f"Failed to generate feedback for question {q_num}: {str(e)}")
+            return "Feedback generation failed. Please review the scores manually."
     
-    def generate_overall_feedback(self, overall_scores: Dict[str, Any]) -> str:
+    def generate_overall_feedback(self, overall_scores: Dict[str, Any], delay: float = None) -> str:
         """Generate concise overall feedback for the submission using Groq directly"""
+        # Apply delay to avoid rate limiting
+        delay = delay if delay is not None else self.default_delay
+        time.sleep(delay)
+        
         # Format the prompt with score values
         formatted_prompt = self.overall_prompt.format(
             overall_context_score=overall_scores.get("context", {}).get("score", "N/A"),
@@ -109,19 +139,37 @@ Target 1-2 key areas for improvement based on the weakest scores."""
             overall_grammar_score=overall_scores.get("grammar", {}).get("score", "N/A")
         )
         
-        # Call Groq API
-        response = self.client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "You are a helpful educational assistant providing very brief, actionable feedback. Limit your response to 2-3 sentences maximum."},
-                {"role": "user", "content": formatted_prompt}
-            ],
-            model=self.model,
-            timeout=2.0,
-        )
-        
-        # Extract response content
-        feedback = response.choices[0].message.content.strip()
-        return feedback
+        try:
+            # Call Groq API with exponential backoff retry
+            max_retries = 3
+            retry_delay = delay
+            
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": "You are a helpful educational assistant providing very brief, actionable feedback. Limit your response to 2-3 sentences maximum."},
+                            {"role": "user", "content": formatted_prompt}
+                        ],
+                        model=self.model,
+                        timeout=2.0,
+                    )
+                    
+                    # Extract response content
+                    feedback = response.choices[0].message.content.strip()
+                    return feedback
+                    
+                except Exception as e:
+                    print(f"Error calling Groq API (attempt {attempt+1}/{max_retries}): {str(e)}")
+                    if attempt < max_retries - 1:
+                        print(f"Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Double the delay for next retry
+                    else:
+                        return "Overall feedback generation failed. Please review the scores manually."
+        except Exception as e:
+            print(f"Failed to generate overall feedback: {str(e)}")
+            return "Overall feedback generation failed. Please review the scores manually."
     
     def save_feedback_to_mongo(self, submission_id: str, overall_feedback: str, question_feedback: Dict[int, str]):
         """Save generated feedback to MongoDB for each question and overall"""
@@ -167,8 +215,11 @@ Target 1-2 key areas for improvement based on the weakest scores."""
         if updates:
             self.results_collection.bulk_write(updates)
     
-    def run(self, pdf_files: List[str], submission_ids: List[int] = None):
+    def run(self, pdf_files: List[str], submission_ids: List[int] = None, delay: float = None):
         """Run feedback generation for multiple submissions"""
+        delay = delay if delay is not None else self.default_delay
+        print(f"Running feedback generation with {delay}s delay between API calls")
+        
         results = []
         
         # Get teacher questions for reference
@@ -195,10 +246,10 @@ Target 1-2 key areas for improvement based on the weakest scores."""
             overall_scores = evaluation_data.get("overall_scores", {})
             questions = evaluation_data.get("questions", [])
             
-            # Generate overall feedback
-            overall_feedback = self.generate_overall_feedback(overall_scores)
+            # Generate overall feedback with delay
+            overall_feedback = self.generate_overall_feedback(overall_scores, delay)
             
-            # Generate feedback for each question
+            # Generate feedback for each question with delay
             question_feedback = {}
             for question in questions:
                 q_num = question.get("question_number")
@@ -215,7 +266,8 @@ Target 1-2 key areas for improvement based on the weakest scores."""
                     q_num, 
                     scores, 
                     question_text,
-                    student_answer
+                    student_answer,
+                    delay
                 )
                 question_feedback[q_num] = feedback
             

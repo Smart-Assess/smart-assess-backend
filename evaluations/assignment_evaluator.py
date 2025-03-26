@@ -81,7 +81,7 @@ class AssignmentEvaluator:
 
         return teacher_questions, questions_answers_by_submission
 
-    def run(self, pdf_files, total_grade, submission_ids):
+    def run(self, pdf_files, total_grade, submission_ids=None):
         # Extract questions and answers from PDFs
         self.extract_qa_pairs(pdf_files, submission_ids=submission_ids)
         teacher_questions, questions_answers_by_submission = self.fetch_qa_pairs()
@@ -105,7 +105,17 @@ class AssignmentEvaluator:
             try:
                 from evaluations.ai_detection import AIDetector
                 self.ai_detector = AIDetector(self.course_id, self.assignment_id)
-                ai_results = self.ai_detector.run(teacher_questions, questions_answers_by_submission, submission_ids=submission_ids)
+                
+                # Get AI detection delay from request (default to 1 second if not specified)
+                ai_delay = getattr(self.request, "ai_detection_delay", 1.5)
+                print(f"Running AI detection with {ai_delay}s delay between API calls")
+                
+                ai_results = self.ai_detector.run(
+                    teacher_questions, 
+                    questions_answers_by_submission, 
+                    submission_ids=submission_ids,
+                    delay=ai_delay
+                )
                 print(f"AI detection completed: {len(ai_results['results']) if ai_results else 0} submissions processed")
                 
                 # Debug: print the AI scores for each question in each submission
@@ -120,6 +130,10 @@ class AssignmentEvaluator:
                 self.grammar_checker = GrammarChecker()
                 processed_count = 0
                 
+                # Get grammar delay from request (default to 0.5 seconds if not specified)
+                grammar_delay = getattr(self.request, "grammar_delay", 0.5)
+                print(f"Running grammar checking with {grammar_delay}s delay between API calls")
+                
                 for submission_id, qa_pairs in questions_answers_by_submission.items():
                     for key, text in qa_pairs.items():
                         if key.startswith("Answer#"):
@@ -129,9 +143,9 @@ class AssignmentEvaluator:
                             if not text or len(text.strip()) < 5:
                                 continue
                             
-                            # Evaluate grammar
+                            # Evaluate grammar with delay
                             print(f"Checking grammar for {submission_id} - Question {q_num}")
-                            corrected_text, grammar_score = self.grammar_checker.evaluate(text)
+                            corrected_text, grammar_score = self.grammar_checker.evaluate(text, delay=grammar_delay)
                             print(f"Grammar score for {submission_id} - Question {q_num}: {grammar_score}")
                             processed_count += 1
                             
@@ -197,10 +211,13 @@ class AssignmentEvaluator:
         
         # Generate feedback for each submission
         try:
+            feedback_delay = getattr(self.request, "feedback_delay", 1.0)
+            print(f"Running feedback generation with {feedback_delay}s delay between API calls")
+            
             for i, pdf_file in enumerate(pdf_files[1:]):  # Skip teacher PDF
                 if i < len(submission_ids):
                     submission_id = submission_ids[i]
-                    feedback_result = self.feedback_generator.run([pdf_file], [submission_id])
+                    feedback_result = self.feedback_generator.run([pdf_file], [submission_id], delay=feedback_delay)
                     print(f"Feedback generated for submission {submission_id}: {feedback_result}")
         except Exception as e:
             print(f"Error generating feedback: {str(e)}")

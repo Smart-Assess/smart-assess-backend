@@ -509,7 +509,7 @@ async def get_assignment_submissions(
         "success": True,
         "status": 200,
         "assignment_id": assignment_id,
-        "total": total,
+    "total": total,
         "page": page,
         "total_pages": (total + limit - 1) // limit,
         "submissions": submissions_data,
@@ -583,17 +583,35 @@ async def evaluate_submissions(
             # Create a list of all PDF files (teacher + student submissions)
             pdf_files = [teacher_pdf_path] + list(submission_paths.values())
 
-            # Initialize AssignmentEvaluator
-            evaluator = AssignmentEvaluator(course_id=course_id, assignment_id=assignment_id, request=request, rag=rag, db=db)
+            request_dict = request.dict()
+            request_dict["grammar_delay"] = 0.5
+            request_dict["ai_detection_delay"] = 1.0
+            modified_request = EvaluationRequest(**request_dict)
+            
+            # Initialize AssignmentEvaluator with modified request
+            evaluator = AssignmentEvaluator(
+                course_id=course_id, 
+                assignment_id=assignment_id, 
+                request=modified_request, 
+                rag=rag, 
+                db=db
+            )
             
             # Print evaluation configuration for debugging
             print(f"Evaluation configuration: AI detection: {request.enable_ai_detection}, Grammar: {request.enable_grammar}, Plagiarism: {request.enable_plagiarism}")
+            print(f"Rate limiting: Grammar delay: 0.5s, AI detection delay: 1.0s")
+            
+            db_mongo.evaluation_results.delete_many({
+                "course_id": course_id,
+                "assignment_id": assignment_id
+            })
+            print(f"Removed existing MongoDB evaluations for assignment {assignment_id}")
             
             # Run evaluation
             evaluator.run(pdf_files=pdf_files, total_grade=assignment.grade, submission_ids=submission_ids)
             
             # Wait briefly to ensure MongoDB updates have completed
-            time.sleep(0.3)
+            time.sleep(0.5)
 
             # Collect evaluation results with proper feedback handling
             for submission_id, temp_path in submission_paths.items():
@@ -649,13 +667,14 @@ async def evaluate_submissions(
                     # Add result to list
                     evaluation_results.append(result)
                     
-                    # Update PostgreSQL record for compatibility
+                    # Update or create PostgreSQL record
                     existing_eval = db.query(AssignmentEvaluation).filter(
                         AssignmentEvaluation.submission_id == submission_id
                     ).first()
                     
                     if existing_eval:
                         # Update existing evaluation
+                        print(f"Updating existing evaluation for submission {submission_id}")
                         existing_eval.total_score = overall_scores.get("total", {}).get("score", 0)
                         existing_eval.plagiarism_score = overall_scores.get("plagiarism", {}).get("score", 0)
                         existing_eval.ai_detection_score = overall_scores.get("ai_detection", {}).get("score", 0)
@@ -664,6 +683,7 @@ async def evaluate_submissions(
                         existing_eval.updated_at = datetime.now()
                     else:
                         # Create new evaluation record
+                        print(f"Creating new evaluation for submission {submission_id}")
                         new_eval = AssignmentEvaluation(
                             submission_id=submission_id,
                             total_score=overall_scores.get("total", {}).get("score", 0),
@@ -674,7 +694,7 @@ async def evaluate_submissions(
                         )
                         db.add(new_eval)
                     
-                    # Commit changes
+                    # Commit changes to PostgreSQL
                     db.commit()
 
         finally:
@@ -742,42 +762,227 @@ async def get_submission_details(
             detail="Submission not found"
         )
 
-    # First check evaluation_results collection
+    # First check evaluation_results collection using submission_id
     submission_data = db_mongo.evaluation_results.find_one({
         "course_id": course_id,
         "assignment_id": assignment_id,
-        "pdf_file": submission.submission_pdf_url
+        "submission_id": submission_id
     })
 
+    # If not found, try the alternate format (pdf_file as numeric ID)
     if not submission_data:
+        submission_data = db_mongo.evaluation_results.find_one({
+            "course_id": course_id,
+            "assignment_id": assignment_id,
+            "pdf_file": submission_id
+        })
+
+    # Make a deepcopy to avoid modifying the original document
+    if submission_data:
+        # We want to preserve all the original data
+        processed_data = dict(submission_data)
+        
+        # Try to get question-answer extraction data from qa_extraction collection
+        qa_data = db_mongo.qa_extractions.find_one({
+            "course_id": course_id,
+            "assignment_id": assignment_id,
+            "submission_id": submission_id,
+            "is_teacher": False  # Make sure we're getting student's answers
+        })
+        
+        if not qa_data:
+            # Try again with pdf_file
+            qa_data = db_mongo.qa_extractions.find_one({
+                "course_id": course_id,
+                "assignment_id": assignment_id,
+                "pdf_file": submission_id,
+                "is_teacher": False
+            })
+        
+        # Also get teacher's questions for reference
+        teacher_qa = db_mongo.qa_extractions.find_one({
+            "course_id": course_id,
+            "assignment_id": assignment_id,
+            "is_teacher": True
+        })
+        
+        # Process and enhance questions with their text if available
+        questions = processed_data.get("questions", [])
+        
+        if qa_data and "qa_pairs" in qa_data:
+            # Create a mapping from question number to student answers
+            qa_map = {}
+            for pair in qa_data.get("qa_pairs", []):
+                q_num = pair.get("question_number")
+                if q_num:
+                    qa_map[q_num] = {
+                        "question": pair.get("question", ""),
+                        "answer": pair.get("answer", "")
+                    }
+            
+            # Create a mapping from question number to teacher questions
+            teacher_qa_map = {}
+            if teacher_qa and "qa_pairs" in teacher_qa:
+                for pair in teacher_qa.get("qa_pairs", []):
+                    q_num = pair.get("question_number")
+                    if q_num:
+                        teacher_qa_map[q_num] = {
+                            "question": pair.get("question", ""),
+                            "answer": pair.get("answer", "")
+                        }
+            
+            # Enhance questions with text (while preserving all original data)
+            for question in questions:
+                q_num = question.get("question_number")
+                
+                # Add student's answer if available
+                if q_num in qa_map:
+                    question["question_text"] = qa_map[q_num].get("question", "")
+                    question["student_answer"] = qa_map[q_num].get("answer", "")
+                
+                # Add teacher's question if available
+                if q_num in teacher_qa_map:
+                    if not question.get("question_text"):
+                        question["question_text"] = teacher_qa_map[q_num].get("question", "")
+                    question["teacher_answer"] = teacher_qa_map[q_num].get("answer", "")
+            
+            processed_data["questions"] = questions
+        
+        # Use the processed data with enhanced questions
+        submission_data = processed_data
+        
+    else:
         # Check PostgreSQL database for evaluation data
         evaluation = db.query(AssignmentEvaluation).filter(
             AssignmentEvaluation.submission_id == submission_id
         ).first()
         
         if evaluation:
-            # Create minimal response with PostgreSQL data
+            # Create response with PostgreSQL data
             submission_data = {
                 "course_id": course_id,
                 "assignment_id": assignment_id,
                 "submission_id": submission_id,
-                "pdf_file": submission.submission_pdf_url,
+                "pdf_file": submission_id,
                 "overall_scores": {
-                    "total": {"score": float(evaluation.total_score or 0.0)},
-                    "plagiarism": {"score": float(evaluation.plagiarism_score or 0.0)},
-                    "ai_detection": {"score": float(evaluation.ai_detection_score or 0.0)},
-                    "grammar": {"score": float(evaluation.grammar_score or 0.0)}
+                    "total": {
+                        "score": float(evaluation.total_score or 0.0),
+                        "evaluated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                    },
+                    "plagiarism": {
+                        "score": float(evaluation.plagiarism_score or 0.0),
+                        "evaluated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                    },
+                    "ai_detection": {
+                        "score": float(evaluation.ai_detection_score or 0.0),
+                        "evaluated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                    },
+                    "grammar": {
+                        "score": float(evaluation.grammar_score or 0.0),
+                        "evaluated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                    }
                 },
                 "overall_feedback": {
                     "content": evaluation.feedback or "",
-                    "generated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else ""
-                }
+                    "generated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                },
+                "questions": []
             }
+            
+            # Try to get question-answer extraction data to add questions
+            qa_data = db_mongo.qa_extractions.find_one({
+                "course_id": course_id,
+                "assignment_id": assignment_id,
+                "submission_id": submission_id,
+                "is_teacher": False
+            })
+            
+            if not qa_data:
+                qa_data = db_mongo.qa_extractions.find_one({
+                    "course_id": course_id,
+                    "assignment_id": assignment_id,
+                    "pdf_file": submission_id,
+                    "is_teacher": False
+                })
+            
+            # Get teacher's questions
+            teacher_qa = db_mongo.qa_extractions.find_one({
+                "course_id": course_id,
+                "assignment_id": assignment_id,
+                "is_teacher": True
+            })
+                
+            # If we found QA data, add question information
+            questions = []
+            if qa_data and "qa_pairs" in qa_data:
+                for pair in qa_data.get("qa_pairs", []):
+                    q_num = pair.get("question_number")
+                    if q_num:
+                        # Get teacher answer if available
+                        teacher_answer = ""
+                        if teacher_qa and "qa_pairs" in teacher_qa:
+                            for teacher_pair in teacher_qa.get("qa_pairs", []):
+                                if teacher_pair.get("question_number") == q_num:
+                                    teacher_answer = teacher_pair.get("answer", "")
+                                    break
+                        
+                        # Create a question entry with detailed structure
+                        questions.append({
+                            "question_number": q_num,
+                            "question_text": pair.get("question", ""),
+                            "student_answer": pair.get("answer", ""),
+                            "teacher_answer": teacher_answer,
+                            "scores": {
+                                "context": {
+                                    "score": 0.0,
+                                    "evaluated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                                },
+                                "plagiarism": {
+                                    "score": 0.0,
+                                    "copied_sentence": "",
+                                    "evaluated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                                },
+                                "ai_detection": {
+                                    "score": 0.0,
+                                    "evaluated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                                },
+                                "grammar": {
+                                    "score": 0.0,
+                                    "evaluated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                                }
+                            },
+                            "feedback": {
+                                "content": "",
+                                "generated_at": evaluation.updated_at.isoformat() if evaluation.updated_at else datetime.now().isoformat()
+                            }
+                        })
+                
+                submission_data["questions"] = sorted(questions, key=lambda x: x["question_number"])
         else:
             raise HTTPException(
                 status_code=404,
                 detail="Submission details not found"
             )
+
+    # Get student information
+    student = db.query(Student).filter(Student.id == submission.student_id).first()
+    if student:
+        submission_data["student"] = {
+            "id": student.id,
+            "student_id": student.student_id,
+            "name": student.full_name,
+            "batch": student.batch,
+            "department": student.department,
+            "section": student.section,
+            "image": student.image_url
+        }
+    
+    # Add submission information
+    submission_data["submission"] = {
+        "id": submission.id,
+        "submitted_at": submission.submitted_at.strftime("%I:%M %p - %d/%b/%Y"),
+        "pdf_url": submission.submission_pdf_url
+    }
 
     # Convert MongoDB document to serializable format
     serializable_data = json.loads(json.dumps(submission_data, cls=JSONEncoder))
@@ -787,6 +992,7 @@ async def get_submission_details(
         "status": 200,
         "submission": serializable_data
     }
+
 
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}/total-scores", response_model=dict)
 async def get_total_scores(
@@ -886,6 +1092,7 @@ async def get_total_scores(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scores: {str(e)}")
 
+
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}/student/{student_id}/evaluation", response_model=dict)
 async def get_student_evaluation(
     course_id: int,
@@ -894,11 +1101,6 @@ async def get_student_evaluation(
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin)
 ):
-    """
-    Get detailed evaluation for a specific student's assignment submission,
-    including per-question scores, overall scores, and feedback.
-    """
-    # Verify course and assignment ownership
     course = db.query(Course).filter(
         Course.id == course_id,
         Course.teacher_id == current_teacher.id
@@ -921,7 +1123,6 @@ async def get_student_evaluation(
             detail="Assignment not found"
         )
 
-    # Find the student's submission
     submission = db.query(AssignmentSubmission).filter(
         AssignmentSubmission.assignment_id == assignment_id,
         AssignmentSubmission.student_id == student_id
@@ -933,7 +1134,6 @@ async def get_student_evaluation(
             detail="No submission found for this student"
         )
 
-    # Get student details
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(
@@ -941,15 +1141,71 @@ async def get_student_evaluation(
             detail="Student not found"
         )
 
-    # Get evaluation data from MongoDB
     evaluation_data = db_mongo.evaluation_results.find_one({
         "course_id": course_id,
         "assignment_id": assignment_id,
-        "pdf_file": submission.submission_pdf_url
+        "submission_id": submission.id
     })
+    
+    if not evaluation_data:
+        evaluation_data = db_mongo.evaluation_results.find_one({
+            "course_id": course_id,
+            "assignment_id": assignment_id,
+            "pdf_file": submission.id
+        })
+
+    qa_data = db_mongo.qa_extractions.find_one({
+        "course_id": course_id,
+        "assignment_id": assignment_id,
+        "submission_id": submission.id,
+        "is_teacher": False
+    })
+    
+    if not qa_data:
+        qa_data = db_mongo.qa_extractions.find_one({
+            "course_id": course_id,
+            "assignment_id": assignment_id,
+            "pdf_file": submission.id,
+            "is_teacher": False
+        })
+    
+    teacher_qa = db_mongo.qa_extractions.find_one({
+        "course_id": course_id,
+        "assignment_id": assignment_id,
+        "is_teacher": True
+    })
+    
+    qa_pairs_map = {}
+    if qa_data and "qa_pairs" in qa_data:
+        qa_pairs = qa_data.get("qa_pairs", {})
+        if isinstance(qa_pairs, dict):
+            for key, value in qa_pairs.items():
+                if key.startswith("Question#"):
+                    q_num = int(key.replace("Question#", ""))
+                    answer_key = f"Answer#{q_num}"
+                    answer = qa_pairs.get(answer_key, "")
+                    
+                    qa_pairs_map[q_num] = {
+                        "question": value,
+                        "answer": answer
+                    }
+    
+    teacher_qa_map = {}
+    if teacher_qa and "qa_pairs" in teacher_qa:
+        teacher_qa_pairs = teacher_qa.get("qa_pairs", {})
+        if isinstance(teacher_qa_pairs, dict):
+            for key, value in teacher_qa_pairs.items():
+                if key.startswith("Question#"):
+                    q_num = int(key.replace("Question#", ""))
+                    answer_key = f"Answer#{q_num}"
+                    answer = teacher_qa_pairs.get(answer_key, "")
+                    
+                    teacher_qa_map[q_num] = {
+                        "question": value,
+                        "answer": answer
+                    }
 
     if not evaluation_data:
-        # Check PostgreSQL database for evaluation data
         evaluation = db.query(AssignmentEvaluation).filter(
             AssignmentEvaluation.submission_id == submission.id
         ).first()
@@ -960,7 +1216,24 @@ async def get_student_evaluation(
                 detail="No evaluation found for this submission"
             )
         
-        # Create a minimal response with PostgreSQL data
+        formatted_questions = []
+        
+        if qa_pairs_map:
+            for q_num, qa_pair in qa_pairs_map.items():
+                formatted_questions.append({
+                    "question_number": q_num,
+                    "question_text": qa_pair.get("question", ""),
+                    "student_answer": qa_pair.get("answer", ""),
+                    "scores": {
+                        "context_score": 0.0,
+                        "plagiarism_score": 0.0,
+                        "plagiarism_copied_sentence": "",
+                        "ai_detection_score": 0.0,
+                        "grammar_score": 0.0
+                    },
+                    "feedback": ""
+                })
+        
         student_evaluation = {
             "student": {
                 "id": student.id,
@@ -978,79 +1251,85 @@ async def get_student_evaluation(
             },
             "overall_scores": {
                 "total_score": float(evaluation.total_score or 0.0),
+                "context_score": 0.0,
                 "plagiarism_score": float(evaluation.plagiarism_score or 0.0),
                 "ai_detection_score": float(evaluation.ai_detection_score or 0.0),
                 "grammar_score": float(evaluation.grammar_score or 0.0)
             },
             "overall_feedback": evaluation.feedback or "",
-            "questions": [],  # No per-question data available in older format
-            "evaluated_at": evaluation.updated_at.strftime("%I:%M %p - %d/%b/%Y") if evaluation.updated_at else ""
+            "questions": sorted(formatted_questions, key=lambda x: x["question_number"])
         }
         
-        return {
-            "success": True,
-            "status": 200,
-            "evaluation": student_evaluation
-        }
-    
-    # Process MongoDB data (full evaluation with per-question details)
-    overall_scores = evaluation_data.get("overall_scores", {})
-    questions_data = evaluation_data.get("questions", [])
-    
-    # Format questions data
-    formatted_questions = []
-    for question in questions_data:
-        q_num = question.get("question_number")
-        scores = question.get("scores", {})
-        feedback = question.get("feedback", {}).get("content", "")
+    else:
+        overall_scores = evaluation_data.get("overall_scores", {})
+        questions_data = evaluation_data.get("questions", [])
         
-        formatted_questions.append({
-            "question_number": q_num,
-            "question_text": question.get("question", ""),
-            "student_answer": question.get("answer", ""),
-            "scores": {
+        formatted_questions = []
+        for question in questions_data:
+            q_num = question.get("question_number")
+            scores = question.get("scores", {})
+            feedback = question.get("feedback", {}).get("content", "")
+            
+            question_text = ""
+            student_answer = ""
+            
+            if q_num in qa_pairs_map:
+                question_text = qa_pairs_map[q_num].get("question", "")
+                student_answer = qa_pairs_map[q_num].get("answer", "")
+            
+            if not question_text and q_num in teacher_qa_map:
+                question_text = teacher_qa_map[q_num].get("question", "")
+            
+            scores_obj = {
                 "context_score": scores.get("context", {}).get("score", 0.0),
                 "plagiarism_score": scores.get("plagiarism", {}).get("score", 0.0),
                 "ai_detection_score": scores.get("ai_detection", {}).get("score", 0.0),
-                "grammar_score": scores.get("grammar", {}).get("score", 0.0),
-                "total_score": scores.get("total", {}).get("score", 0.0)
+                "grammar_score": scores.get("grammar", {}).get("score", 0.0)
+            }
+            
+            if "copied_sentence" in scores.get("plagiarism", {}):
+                scores_obj["plagiarism_copied_sentence"] = scores["plagiarism"]["copied_sentence"]
+            else:
+                scores_obj["plagiarism_copied_sentence"] = ""
+            
+            formatted_questions.append({
+                "question_number": q_num,
+                "question_text": question_text,
+                "student_answer": student_answer,
+                "scores": scores_obj,
+                "feedback": feedback
+            })
+        
+        student_evaluation = {
+            "student": {
+                "id": student.id,
+                "student_id": student.student_id,
+                "name": student.full_name,
+                "batch": student.batch,
+                "department": student.department,
+                "section": student.section,
+                "image": student.image_url
             },
-            "feedback": feedback
-        })
+            "submission": {
+                "id": submission.id,
+                "submitted_at": submission.submitted_at.strftime("%I:%M %p - %d/%b/%Y"),
+                "pdf_url": submission.submission_pdf_url
+            },
+            "overall_scores": {
+                "total_score": overall_scores.get("total", {}).get("score", 0.0),
+                "context_score": overall_scores.get("context", {}).get("score", 0.0),
+                "plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0.0),
+                "ai_detection_score": overall_scores.get("ai_detection", {}).get("score", 0.0),
+                "grammar_score": overall_scores.get("grammar", {}).get("score", 0.0)
+            },
+            "overall_feedback": evaluation_data.get("overall_feedback", {}).get("content", ""),
+            "questions": sorted(formatted_questions, key=lambda x: x["question_number"])
+        }
     
-    # Build response
-    student_evaluation = {
-        "student": {
-            "id": student.id,
-            "student_id": student.student_id,
-            "name": student.full_name,
-            "batch": student.batch,
-            "department": student.department,
-            "section": student.section,
-            "image": student.image_url
-        },
-        "submission": {
-            "id": submission.id,
-            "submitted_at": submission.submitted_at.strftime("%I:%M %p - %d/%b/%Y"),
-            "pdf_url": submission.submission_pdf_url
-        },
-        "overall_scores": {
-            "total_score": overall_scores.get("total", {}).get("score", 0.0),
-            "context_score": overall_scores.get("context", {}).get("score", 0.0),
-            "plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0.0),
-            "ai_detection_score": overall_scores.get("ai_detection", {}).get("score", 0.0),
-            "grammar_score": overall_scores.get("grammar", {}).get("score", 0.0)
-        },
-        "overall_feedback": evaluation_data.get("overall_feedback", {}).get("content", ""),
-        "questions": sorted(formatted_questions, key=lambda x: x["question_number"]),
-        "evaluated_at": evaluation_data.get("evaluated_at", "")
-    }
-    
-    # Convert MongoDB document to serializable format
     serializable_data = json.loads(json.dumps(student_evaluation, cls=JSONEncoder))
     
     return {
         "success": True,
         "status": 200,
         "evaluation": serializable_data
-    }
+    } 
