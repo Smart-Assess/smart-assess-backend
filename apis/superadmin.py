@@ -179,12 +179,20 @@ async def get_universities(
 
     universities_data = []
     for uni in universities:
+        teachers_count = db.query(Teacher).filter(
+            Teacher.university_id == uni.id
+        ).count()
+        
+        students_count = db.query(Student).filter(
+            Student.university_id == uni.id
+        ).count()
+        
         universities_data.append({
             "uni_id": f"Id-{str(uni.id).zfill(4)}",
             "id": uni.id,
             "name": uni.name,
-            "students_count": 0,
-            "teachers_count": 0,
+            "students_count": students_count,
+            "teachers_count": teachers_count,
         })
 
     return {
