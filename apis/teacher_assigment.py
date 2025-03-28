@@ -1,4 +1,5 @@
 # >> Import necessary modules and packages from FastAPI and other libraries
+from datetime import timezone
 import json
 from tempfile import NamedTemporaryFile
 import time
@@ -171,18 +172,14 @@ async def create_assignment(
         # Validate the format of the question PDF
         extractor = PDFQuestionAnswerExtractor(
             pdf_files=[temp_file_path],
-            course_id = course_id,
-            assignment_id = 0,
-            is_teacher = True
+            course_id=course_id,
+            assignment_id=0,
+            is_teacher=True
         )
         teacher_text = extractor.extract_text_from_pdf(temp_file_path)
-        print(teacher_text)
-        # for page in teacher_text:
-        #     print("Page:::",page)
-        parsed_dict= extractor.parse_qa(teacher_text)
-        # valid_format = any("Question#" in teacher_text and "Answer#" in teacher_text)
-        print("parsed_dict: ",parsed_dict)
-        
+        print("Extracted text from teacher PDF")
+        parsed_dict = extractor.parse_qa(teacher_text)
+        print("Parsed Q&A pairs:", parsed_dict)
         
         if not parsed_dict:
             raise HTTPException(
@@ -216,6 +213,22 @@ async def create_assignment(
         db.add(new_assignment)
         db.commit()
         db.refresh(new_assignment)
+        
+        # Now that we have the assignment ID, save the extracted Q&A pairs to MongoDB
+        # Save in the same format as the example
+        mongo_document = {
+            "is_teacher": True,
+            "course_id": course_id,
+            "assignment_id": new_assignment.id,
+            "submission_id": None,
+            "extracted_at": datetime.now(timezone.utc),
+            "pdf_file": temp_file_path,
+            "qa_pairs": parsed_dict
+        }
+        
+        # Insert into MongoDB
+        result = db_mongo.qa_extractions.insert_one(mongo_document)
+        print(f"Saved teacher Q&A to MongoDB with ID: {result.inserted_id}")
 
         return {
             "success": True,
@@ -233,6 +246,7 @@ async def create_assignment(
     finally:
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
 
 @router.put("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
 async def update_assignment(
