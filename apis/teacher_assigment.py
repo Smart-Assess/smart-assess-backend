@@ -1,4 +1,3 @@
-
 # >> Import necessary modules and packages from FastAPI and other libraries
 import json
 from tempfile import NamedTemporaryFile
@@ -1322,3 +1321,107 @@ async def get_student_evaluation(
         "status": 200,
         "result": result_data
     }  
+
+@router.delete("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
+async def delete_assignment(
+    course_id: int,
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin)
+):
+    """Delete an assignment and all related data (submissions, evaluations, and MongoDB records)"""
+    course = db.query(Course).filter(
+        Course.id == course_id,
+        Course.teacher_id == current_teacher.id
+    ).first()
+    
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found or you don't have access"
+        )
+
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.course_id == course_id
+    ).first()
+    
+    if not assignment:
+        raise HTTPException(
+            status_code=404,
+            detail="Assignment not found"
+        )
+        
+    try:
+        # Get all submissions for this assignment first
+        submissions = db.query(AssignmentSubmission).filter(
+            AssignmentSubmission.assignment_id == assignment_id
+        ).all()
+        
+        submission_ids = [submission.id for submission in submissions]
+        
+        # Step 1: Delete MongoDB data first
+        # Delete evaluation results
+        mongo_eval_result = db_mongo.evaluation_results.delete_many({
+            "course_id": course_id,
+            "assignment_id": assignment_id
+        })
+        
+        # Delete Q&A extractions for this assignment
+        mongo_qa_result = db_mongo.qa_extractions.delete_many({
+            "course_id": course_id,
+            "assignment_id": assignment_id
+        })
+        
+        # Step 2: Delete S3 files
+        # Delete student submission PDFs from S3
+        s3_submissions_deleted = 0
+        for submission in submissions:
+            if submission.submission_pdf_url:
+                if delete_from_s3(submission.submission_pdf_url):
+                    s3_submissions_deleted += 1
+        
+        # Delete assignment PDF from S3 if exists
+        s3_assignment_deleted = False
+        if assignment.question_pdf_url:
+            s3_assignment_deleted = delete_from_s3(assignment.question_pdf_url)
+        
+        # Step 3: Delete SQL data
+        # Delete evaluations for all submissions
+        evaluations_deleted = 0
+        if submission_ids:
+            evaluations_deleted = db.query(AssignmentEvaluation).filter(
+                AssignmentEvaluation.submission_id.in_(submission_ids)
+            ).delete(synchronize_session=False)
+        
+        # Delete all submissions for this assignment
+        submissions_deleted = db.query(AssignmentSubmission).filter(
+            AssignmentSubmission.assignment_id == assignment_id
+        ).delete(synchronize_session=False)
+        
+        # Step 4: Delete the assignment itself
+        db.delete(assignment)
+        db.commit()
+        
+        return {
+            "success": True,
+            "status": 200,
+            "message": f"Assignment and all related data deleted successfully",
+            "details": {
+                "assignment_id": assignment_id,
+                "submissions_deleted": submissions_deleted,
+                "evaluations_deleted": evaluations_deleted,
+                "mongo_evaluations_deleted": mongo_eval_result.deleted_count if mongo_eval_result else 0,
+                "mongo_qa_deleted": mongo_qa_result.deleted_count if mongo_qa_result else 0,
+                "s3_files_deleted": {
+                    "assignment_file": s3_assignment_deleted,
+                    "submission_files": s3_submissions_deleted
+                }
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to delete assignment: {str(e)}"
+        )

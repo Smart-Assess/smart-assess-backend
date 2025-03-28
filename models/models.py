@@ -58,10 +58,9 @@ class University(Base):
     zipcode = Column(String, nullable=False)
     super_admin_id = Column(Integer, ForeignKey('super_admins.id'))
     super_admin = relationship("SuperAdmin", back_populates="universities")
-    admins = relationship("UniversityAdmin", back_populates="university")
-    students = relationship("Student", back_populates="university")
-    teachers = relationship(
-        "Teacher", back_populates="university")  # Add this line
+    admins = relationship("UniversityAdmin", back_populates="university", cascade="all, delete-orphan")
+    students = relationship("Student", back_populates="university", cascade="all, delete-orphan")
+    teachers = relationship("Teacher", back_populates="university", cascade="all, delete-orphan")
 
 
 class Student(Base):

@@ -32,9 +32,19 @@ async def login_for_access_token(
         user = auth_function(db, form_data.username, form_data.password)
         if user:
             role = user_role
+            
+            # Get the appropriate name field based on user type
+            if user_role == "student" or user_role == "teacher":
+                name = user.full_name
+            elif user_role == "universityadmin":
+                name = user.name
+            elif user_role == "superadmin":
+                name = user.email
+                
             user_data = {
                 "id": user.id,
                 "email": user.email,
+                "name": name,
                 "created_at": user.created_at,
                 "role": role,
             }
@@ -122,8 +132,22 @@ async def get_current_admin(
                 UniversityAdmin.id == user_id).first()
         elif role == "teacher":
             user = db.query(Teacher).filter(Teacher.id == user_id).first()
+            if user:
+                # Verify university still exists
+                university = db.query(University).filter(
+                    University.id == user.university_id
+                ).first()
+                if not university:
+                    raise credentials_exception
         elif role == "student":
             user = db.query(Student).filter(Student.id == user_id).first()
+            if user:
+                # Verify university still exists
+                university = db.query(University).filter(
+                    University.id == user.university_id
+                ).first()
+                if not university:
+                    raise credentials_exception
         else:
             raise credentials_exception
 
