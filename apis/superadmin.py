@@ -225,19 +225,40 @@ async def delete_university(
             detail="University not found or access denied"
         )
 
-    db.query(UniversityAdmin).filter(
-        UniversityAdmin.university_id == university_id
-    ).delete()
-
-    # Delete university
-    db.delete(university)
-    db.commit()
-
-    return {
-        "success": True,
-        "status": 200,
-        "message": "University and associated admin deleted successfully"
-    }
+    try:
+        # Count records that will be deleted for reporting
+        admin_count = db.query(UniversityAdmin).filter(
+            UniversityAdmin.university_id == university_id
+        ).count()
+        
+        teacher_count = db.query(Teacher).filter(
+            Teacher.university_id == university_id
+        ).count()
+        
+        student_count = db.query(Student).filter(
+            Student.university_id == university_id
+        ).count()
+        
+        # Delete university (with cascade)
+        db.delete(university)
+        db.commit()
+        
+        return {
+            "success": True,
+            "status": 200,
+            "message": "University and associated users deleted successfully",
+            "details": {
+                "admins_deleted": admin_count,
+                "teachers_deleted": teacher_count,
+                "students_deleted": student_count
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete university: {str(e)}"
+        )
 
 
 @router.put("/superadmin/university/{university_id}", response_model=dict)
