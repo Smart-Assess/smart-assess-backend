@@ -512,11 +512,19 @@ async def get_assignment_result(
         if total_score == 0 and any(q["plagiarism_score"] > 0.7 for q in detailed_questions):
             feedback = "Your total score is 0 because plagiarism was detected in your submission."
 
+        assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+        if not assignment:
+            raise HTTPException(
+                status_code=404,
+                detail="Assignment not found"
+            )
+
         result_data = {
             "submission_id": submission.id,
             "submitted_at": submission.submitted_at.strftime("%Y-%m-%d %H:%M"),
             "pdf_url": submission.submission_pdf_url,
             "total_score": total_score,
+            "total_grade": assignment.grade,
             "questions": detailed_questions,
             "feedback": feedback,
             "scores": {
@@ -543,8 +551,6 @@ async def get_assignment_result(
             status_code=500, 
             detail=f"Failed to fetch evaluation results: {str(e)}"
         )
- 
-    
 @router.get("/student/assignment/{assignment_id}", response_model=dict)
 async def get_assignment_details(
     assignment_id: int,
