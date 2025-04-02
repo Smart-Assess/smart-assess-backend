@@ -551,6 +551,7 @@ async def get_assignment_result(
             status_code=500, 
             detail=f"Failed to fetch evaluation results: {str(e)}"
         )
+
 @router.get("/student/assignment/{assignment_id}", response_model=dict)
 async def get_assignment_details(
     assignment_id: int,
@@ -586,7 +587,14 @@ async def get_assignment_details(
         AssignmentSubmission.assignment_id == assignment_id,
         AssignmentSubmission.student_id == current_student.id
     ).first()
-    
+
+    evaluation_done = False
+    if submission:
+        evaluation = db.query(AssignmentEvaluation).filter(
+            AssignmentEvaluation.submission_id == submission.id
+        ).first()
+        evaluation_done = evaluation is not None
+
     return {
         "success": True,
         "status": 200,
@@ -608,7 +616,8 @@ async def get_assignment_details(
                 "id": submission.id if submission else None,
                 "submitted_at": submission.submitted_at.strftime("%Y-%m-%d %H:%M") if submission else None,
                 "pdf_url": submission.submission_pdf_url if submission else None,
-                "status": "submitted" if submission else "pending"
+                "status": "submitted" if submission else "pending",
+                "evaluation_done": evaluation_done
             }
         }
     }
