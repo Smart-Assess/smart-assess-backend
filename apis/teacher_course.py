@@ -334,10 +334,11 @@ async def update_course(
                 if not pdf.filename:
                     continue  # Skip empty files
                 
-                if pdf.content_type != 'application/pdf':
+                ext = pdf.filename.split('.')[-1].lower()
+                if ext not in ['pdf', 'ppt', 'pptx']:
                     raise HTTPException(
                         status_code=400, 
-                        detail=f"File {pdf.filename} must be a PDF"
+                        detail=f"File {pdf.filename} must be a PDF or PPT"
                     )
                 
                 original_filename, ext = os.path.splitext(pdf.filename.strip())
@@ -354,16 +355,24 @@ async def update_course(
                     temp_file.write(content)
                     temp_file.close()
                     
+                    file_path = temp_file.name
+                    # Convert PPT/PPTX to PDF if needed
+                    if ext.lower() in ['.ppt', '.pptx']:
+                        converted_pdf_path = convert_ppt_to_pdf(file_path)
+                        os.remove(file_path)  
+                        file_path = converted_pdf_path
+                        filename = f"{original_filename}.pdf"  # Update filename to .pdf
+                    
                     s3_key = f"{course.id}_{filename}"
                     pdf_url = upload_to_s3(
                         folder_name=folder_name,
                         file_name=s3_key,
-                        file_path=temp_file.name
+                        file_path=file_path
                     )
                     
                     if pdf_url:
                         try:
-                            rag.store_pdf_embeddings(temp_file.name, pdf_url)
+                            rag.store_pdf_embeddings(file_path, pdf_url)
                         except Exception as e:
                             print(f"Warning: Failed to store embeddings for {pdf_url}: {e}")
                         updated_urls.append(pdf_url)
