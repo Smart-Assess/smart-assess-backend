@@ -134,7 +134,7 @@ async def submit_assignment(
         raise HTTPException(status_code=404, detail="Assignment not found")
         
     # Check if deadline has passed
-    current_time = datetime.now()
+    current_time = datetime.datetime.now()
     if current_time > assignment.deadline:
         raise HTTPException(
             status_code=403,
@@ -248,7 +248,7 @@ async def update_assignment_submission(
         raise HTTPException(status_code=404, detail="Assignment not found")
     
     # Check if deadline has passed
-    current_time = datetime.now()
+    current_time = datetime.datetime.now()
     if current_time > assignment.deadline:
         raise HTTPException(
             status_code=403,
