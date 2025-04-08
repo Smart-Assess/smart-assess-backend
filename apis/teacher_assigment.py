@@ -1043,18 +1043,40 @@ async def get_total_scores(
 
     try:
         total_scores_data = []
+        total_assignment_grade = assignment.grade
+        
         for submission, student in submissions:
-            # First try to find evaluation results in MongoDB
+            # Try to find evaluation results in MongoDB using submission_id first (more reliable)
             evaluation_data = db_mongo.evaluation_results.find_one({
                 "course_id": course_id,
                 "assignment_id": assignment_id,
-                "pdf_file": submission.submission_pdf_url
+                "submission_id": submission.id
             })
+            
+            # If not found, try fallback method
+            if not evaluation_data:
+                evaluation_data = db_mongo.evaluation_results.find_one({
+                    "course_id": course_id,
+                    "assignment_id": assignment_id,
+                    "pdf_file": submission.id
+                })
 
             if evaluation_data:
-                # Get total score and overall scores from evaluation results
+                # Get overall scores from evaluation results
                 overall_scores = evaluation_data.get("overall_scores", {})
-                feedback = evaluation_data.get("overall_feedback", {}).get("content", "")
+                
+                # Get feedback with proper fallback
+                feedback_obj = evaluation_data.get("overall_feedback", {})
+                feedback_content = ""
+                if isinstance(feedback_obj, dict):
+                    feedback_content = feedback_obj.get("content", "")
+                elif isinstance(feedback_obj, str):
+                    feedback_content = feedback_obj
+                context_score = overall_scores.get("context", {}).get("score", 0.0)
+                total_score = overall_scores.get("total", {}).get("score", 0.0)
+                
+                percentage_score = (total_score / total_assignment_grade * 100) if total_assignment_grade > 0 else 0
+                percentage_score = round(percentage_score, 2)
                 
                 scores = {
                     "student_id": student.student_id,
@@ -1063,12 +1085,14 @@ async def get_total_scores(
                     "department": student.department,
                     "section": student.section,
                     "image": student.image_url,
-                    "total_score": overall_scores.get("total", {}).get("score", 0.0),
-                    "avg_context_score": overall_scores.get("context", {}).get("score", 0.0),
+                    "total_score": total_score,
+                    "total_assignment_grade": total_assignment_grade,
+                    "percentage_score": percentage_score,
+                    "avg_context_score": context_score,
                     "avg_plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0.0),
                     "avg_ai_score": overall_scores.get("ai_detection", {}).get("score", 0.0),
                     "avg_grammar_score": overall_scores.get("grammar", {}).get("score", 0.0),
-                    "feedback": feedback
+                    "feedback": feedback_content
                 }
 
                 total_scores_data.append(scores)
@@ -1079,6 +1103,11 @@ async def get_total_scores(
                 ).first()
                 
                 if evaluation:
+                    # Calculate percentage score
+                    total_score = float(evaluation.total_score or 0.0)
+                    percentage_score = (total_score / total_assignment_grade * 100) if total_assignment_grade > 0 else 0
+                    percentage_score = round(percentage_score, 2)
+                    
                     scores = {
                         "student_id": student.student_id,
                         "name": student.full_name,
@@ -1086,8 +1115,10 @@ async def get_total_scores(
                         "department": student.department,
                         "section": student.section,
                         "image": student.image_url,
-                        "total_score": float(evaluation.total_score or 0.0),
-                        "avg_context_score": 0.0,  # Not stored in older format
+                        "total_score": total_score,
+                        "total_assignment_grade": total_assignment_grade,
+                        "percentage_score": percentage_score,
+                        "avg_context_score": 0.0,  # No context score in SQL
                         "avg_plagiarism_score": float(evaluation.plagiarism_score or 0.0),
                         "avg_ai_score": float(evaluation.ai_detection_score or 0.0),
                         "avg_grammar_score": float(evaluation.grammar_score or 0.0),
@@ -1104,7 +1135,6 @@ async def get_total_scores(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scores: {str(e)}")
-
 
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}/student/{student_id}/evaluation", response_model=dict)
 async def get_student_evaluation(

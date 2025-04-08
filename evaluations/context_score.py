@@ -174,6 +174,7 @@ class ContextScorer:
         }
 
         for submission_id, qa_pairs in questions_answers_by_submission.items():
+            print("submission_id>>>", submission_id)
             # Process submission
             results = self.process_submission(teacher_questions, qa_pairs, total_score=total_score)
             
