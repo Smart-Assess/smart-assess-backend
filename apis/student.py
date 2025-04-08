@@ -7,7 +7,7 @@ from utils.dependencies import get_db
 from apis.auth import get_current_admin
 from utils.s3 import delete_from_s3, upload_to_s3
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter()
 
@@ -133,6 +133,14 @@ async def submit_assignment(
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
         
+    # Check if deadline has passed
+    current_time = datetime.now()
+    if current_time > assignment.deadline:
+        raise HTTPException(
+            status_code=403,
+            detail="Submission deadline has passed. You can no longer submit this assignment."
+        )
+    
     enrollment = db.query(StudentCourse).filter(
         StudentCourse.student_id == current_student.id,
         StudentCourse.course_id == assignment.course_id,
@@ -216,6 +224,205 @@ async def submit_assignment(
     finally:
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
+
+@router.put("/student/assignment/{assignment_id}/update-submission", response_model=dict)
+async def update_assignment_submission(
+    assignment_id: int,
+    submission_pdf: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_student: Student = Depends(get_current_admin)
+):
+    """
+    Update an existing assignment submission:
+    1. Validate the student has access to the assignment
+    2. Check if a previous submission exists
+    3. Check if deadline has passed
+    4. Validate the new PDF follows the required format
+    5. Delete the old submission from S3
+    6. Upload the new submission to S3
+    7. Update the database record
+    """
+    # Validation checks
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    # Check if deadline has passed
+    current_time = datetime.now()
+    if current_time > assignment.deadline:
+        raise HTTPException(
+            status_code=403,
+            detail="Submission deadline has passed. You can no longer update this assignment."
+        )
+        
+    # Check enrollment
+    enrollment = db.query(StudentCourse).filter(
+        StudentCourse.student_id == current_student.id,
+        StudentCourse.course_id == assignment.course_id,
+        StudentCourse.status == "accepted"
+    ).first()
+    
+    if not enrollment:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not enrolled in this course"
+        )
+
+    # Check if submission exists
+    existing_submission = db.query(AssignmentSubmission).filter(
+        AssignmentSubmission.assignment_id == assignment_id,
+        AssignmentSubmission.student_id == current_student.id
+    ).first()
+    
+    if not existing_submission:
+        raise HTTPException(
+            status_code=404,
+            detail="No existing submission found to update. Please use the submit endpoint instead."
+        )
+
+    # Validate file is a PDF
+    if not submission_pdf.content_type == 'application/pdf':
+        raise HTTPException(
+            status_code=400,
+            detail="File must be a PDF"
+        )
+    
+    # Create temporary file
+    import os
+    from tempfile import NamedTemporaryFile
+    from evaluations.base_extractor import PDFQuestionAnswerExtractor
+    
+    temp_file_path = None
+    try:
+        with NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            content = await submission_pdf.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        # Validate PDF format using the extractor
+        extractor = PDFQuestionAnswerExtractor(
+            pdf_files=[temp_file_path],
+            course_id=assignment.course_id,
+            assignment_id=assignment_id,
+            is_teacher=False
+        )
+        extracted_text = extractor.extract_text_from_pdf(temp_file_path)
+        
+        # Parse the Q&A to verify format
+        parsed_dict = extractor.parse_qa(extracted_text)
+        
+        if not parsed_dict:
+            raise HTTPException(
+                status_code=400,
+                detail="Submission PDF is not in the correct format. It must contain 'Question#' and 'Answer#' sections."
+            )
+        
+        # Generate a unique identifier for the new file
+        import uuid
+        from datetime import datetime
+        
+        unique_id = uuid.uuid4()
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        file_extension = submission_pdf.filename.split('.')[-1]
+        new_file_name = f"{current_student.id}_{unique_id}_{timestamp}.{file_extension}"
+        
+        # Delete existing S3 file
+        from utils.s3 import delete_from_s3, upload_to_s3
+        
+        delete_success = delete_from_s3(existing_submission.submission_pdf_url)
+        if not delete_success:
+            print(f"Warning: Failed to delete old submission from S3: {existing_submission.submission_pdf_url}")
+        
+        # Upload new file to S3
+        pdf_url = upload_to_s3(
+            folder_name=f"assignment_submissions/{assignment.course_id}/{assignment_id}",
+            file_name=new_file_name,
+            file_path=temp_file_path
+        )
+        
+        if not pdf_url:
+            raise HTTPException(status_code=500, detail="Failed to upload submission")
+        
+        # Update MongoDB record - delete any existing Q&A extraction for this submission
+        from utils.mongodb import mongo_db
+        
+        mongo_db.db['qa_extractions'].delete_one({
+            "course_id": assignment.course_id,
+            "assignment_id": assignment_id,
+            "submission_id": existing_submission.id,
+            "is_teacher": False
+        })
+        
+        # Store the extracted Q&A in MongoDB for future use
+        qa_document = {
+            "course_id": assignment.course_id,
+            "assignment_id": assignment_id,
+            "is_teacher": False,
+            "submission_id": existing_submission.id,
+            "pdf_file": temp_file_path,
+            "qa_pairs": parsed_dict,
+            "extracted_at": datetime.now(timezone.utc)
+        }
+        
+        mongo_db.db['qa_extractions'].update_one(
+            {
+                "course_id": assignment.course_id,
+                "assignment_id": assignment_id,
+                "submission_id": existing_submission.id,
+                "is_teacher": False
+            },
+            {"$set": qa_document},
+            upsert=True
+        )
+        
+        # Update PostgreSQL submission
+        existing_submission.submission_pdf_url = pdf_url
+        existing_submission.submitted_at = datetime.now()
+        
+        # Delete any existing evaluation for this submission
+        existing_evaluation = db.query(AssignmentEvaluation).filter(
+            AssignmentEvaluation.submission_id == existing_submission.id
+        ).first()
+        
+        if existing_evaluation:
+            db.delete(existing_evaluation)
+        
+        # Also delete MongoDB evaluation results
+        mongo_db.db['evaluation_results'].delete_one({
+            "course_id": assignment.course_id,
+            "assignment_id": assignment_id,
+            "submission_id": existing_submission.id
+        })
+        
+        # Commit changes to database
+        db.commit()
+        db.refresh(existing_submission)
+        
+        return {
+            "success": True,
+            "status": 200,
+            "message": "Submission updated successfully",
+            "submission": {
+                "id": existing_submission.id,
+                "assignment_id": existing_submission.assignment_id,
+                "pdf_url": existing_submission.submission_pdf_url,
+                "submitted_at": existing_submission.submitted_at
+            }
+        }
+        
+    except Exception as e:
+        # Rollback on error
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update submission: {str(e)}"
+        )
+    
+    finally:
+        # Clean up temp file
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
 
 
 @router.delete("/student/assignment/{assignment_id}/submission", response_model=dict)
