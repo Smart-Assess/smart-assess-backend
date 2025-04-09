@@ -14,55 +14,27 @@ class AssignmentScoreCalculator:
         self.grammar_penalty = 0.2  # 20% penalty
         self.max_penalty = 0.7  # Maximum penalty for any category (70%)
 
-    def calculate_question_score(
-        self,
-        context_score: float,
-        plagiarism_score: float = None,
-        ai_score: float = None,
-        grammar_score: float = None
-    ) -> float:
-        """Calculate the score for a single question based on various metrics"""
-        # Ensure all scores are floats with proper defaults
-        context_score = float(context_score) if context_score is not None else 0.0
-        plagiarism_score = float(plagiarism_score) if plagiarism_score is not None else 0.0
-        ai_score = float(ai_score) if ai_score is not None else 0.0
-        grammar_score = float(grammar_score) if grammar_score is not None else 0.0
-        
-        # Start with context score (basis for grading)
-        base_score = context_score
-        
-        # Apply penalties if scores are available
+    def calculate_question_score(self, context_score, plagiarism_score=None, ai_score=None, grammar_score=None):
+        base_score = context_score 
         total_penalty = 0
         
-        # Plagiarism penalty (lower score = more plagiarism, so apply penalty for low scores)
-        if plagiarism_score is not None and plagiarism_score < 1.0:
+        # Calculate penalties from plagiarism, AI, grammar scores
+        if plagiarism_score is not None:
             plagiarism_penalty = (1 - plagiarism_score) * self.plagiarism_penalty
             total_penalty += plagiarism_penalty
-        
-        # AI detection penalty (higher score = more AI-generated, so apply penalty for high scores)
-        if ai_score is not None and ai_score > 0:
+            
+        if ai_score is not None:
             ai_penalty = ai_score * self.ai_detection_penalty
             total_penalty += ai_penalty
-        
-        # Grammar penalty (lower score = worse grammar, so apply penalty for low scores)
-        if grammar_score is not None and grammar_score < 1.0:
+            
+        if grammar_score is not None:
             grammar_penalty = (1 - grammar_score) * self.grammar_penalty
             total_penalty += grammar_penalty
-        
-        # Cap total penalty
+            
         total_penalty = min(total_penalty, self.max_penalty)
         
-        # Apply penalty to base score
+        # Calculate final score for question
         adjusted_score = base_score * (1 - total_penalty)
-        
-        # Debug output
-        print(f"Question score calculation:")
-        print(f"  Base (context) score: {base_score}")
-        print(f"  Plagiarism score: {plagiarism_score}, penalty: {(1 - plagiarism_score) * self.plagiarism_penalty if plagiarism_score is not None else 0}")
-        print(f"  AI score: {ai_score}, penalty: {ai_score * self.ai_detection_penalty if ai_score is not None else 0}")
-        print(f"  Grammar score: {grammar_score}, penalty: {(1 - grammar_score) * self.grammar_penalty if grammar_score is not None else 0}")
-        print(f"  Total penalty: {total_penalty}")
-        print(f"  Final adjusted score: {adjusted_score}")
         
         return adjusted_score
 

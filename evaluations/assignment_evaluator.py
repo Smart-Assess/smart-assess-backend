@@ -222,6 +222,13 @@ class AssignmentEvaluator:
         except Exception as e:
             print(f"Error generating feedback: {str(e)}")
         
+        # Initialize score calculator early
+        score_calculator = AssignmentScoreCalculator(
+            total_grade=total_grade,
+            num_questions=len(teacher_questions) // 2,  # Divide by 2 since we have Q&A pairs
+            db=self.db
+        )
+
         # Calculate total scores for all submissions
         total_scores = []
         
@@ -240,12 +247,12 @@ class AssignmentEvaluator:
                     questions = eval_doc.get("questions", [])
                     question_results = {}
                     
-                    # Build question results dictionary
+                    # Calculate score for each question
                     for question in questions:
                         q_num = question.get("question_number")
                         scores = question.get("scores", {})
                         
-                        # Get individual scores with proper debugging
+                        # Get individual scores
                         context_score = scores.get("context", {}).get("score", 0)
                         plagiarism_score = scores.get("plagiarism", {}).get("score", 0)
                         ai_score = scores.get("ai_detection", {}).get("score", 0)
@@ -253,20 +260,42 @@ class AssignmentEvaluator:
                         
                         print(f"Scores for {submission_id} - Q{q_num}: Context={context_score}, Plagiarism={plagiarism_score}, AI={ai_score}, Grammar={grammar_score}")
                         
+                        # Calculate question score using the score calculator
+                        question_score = score_calculator.calculate_question_score(
+                            context_score=context_score,
+                            plagiarism_score=plagiarism_score,
+                            ai_score=ai_score,
+                            grammar_score=grammar_score
+                        )
+                        
+                        # Store scores for this question
                         question_results[f"Question#{q_num}"] = {
                             "context_score": context_score,
                             "plagiarism_score": plagiarism_score,
                             "ai_score": ai_score,
-                            "grammar_score": grammar_score
+                            "grammar_score": grammar_score,
+                            "total_score": question_score  # Add total score for the question
                         }
-                    
-                    # Calculate final scores
-                    score_calculator = AssignmentScoreCalculator(
-                        total_grade=total_grade,
-                        num_questions=max(len(question_results), 1),  # Prevent division by zero
-                        db=self.db
-                    )
-                    
+                        
+                        # Update MongoDB with question score
+                        mongo_db.db['evaluation_results'].update_one(
+                            {
+                                "course_id": self.course_id,
+                                "assignment_id": self.assignment_id,
+                                "submission_id": submission_id,
+                                "questions.question_number": q_num
+                            },
+                            {
+                                "$set": {
+                                    "questions.$.scores.total": {
+                                        "score": round(question_score, 4),
+                                        "evaluated_at": datetime.now(timezone.utc)
+                                    }
+                                }
+                            }
+                        )
+
+                    # Calculate final overall scores
                     evaluation_result = score_calculator.calculate_submission_evaluation(
                         question_results=question_results
                     )
