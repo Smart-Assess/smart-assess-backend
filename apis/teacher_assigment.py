@@ -825,24 +825,51 @@ async def get_submission_details(
         if qa_data and "qa_pairs" in qa_data:
             # Create a mapping from question number to student answers
             qa_map = {}
-            for pair in qa_data.get("qa_pairs", []):
-                q_num = pair.get("question_number")
-                if q_num:
-                    qa_map[q_num] = {
-                        "question": pair.get("question", ""),
-                        "answer": pair.get("answer", "")
-                    }
+            qa_pairs = qa_data.get("qa_pairs", {})
             
+            # Handle both dictionary and list formats
+            if isinstance(qa_pairs, dict):
+                for key, value in qa_pairs.items():
+                    if key.startswith("Question#"):
+                        q_num = int(key.replace("Question#", ""))
+                        answer_key = f"Answer#{q_num}"
+                        qa_map[q_num] = {
+                            "question": value,
+                            "answer": qa_pairs.get(answer_key, "")
+                        }
+            elif isinstance(qa_pairs, list):
+                for pair in qa_pairs:
+                    if isinstance(pair, dict):
+                        q_num = pair.get("question_number")
+                        if q_num:
+                            qa_map[q_num] = {
+                                "question": pair.get("question", ""),
+                                "answer": pair.get("answer", "")
+                            }
+                
             # Create a mapping from question number to teacher questions
             teacher_qa_map = {}
-            if teacher_qa and "qa_pairs" in teacher_qa:
-                for pair in teacher_qa.get("qa_pairs", []):
-                    q_num = pair.get("question_number")
-                    if q_num:
+            teacher_pairs = teacher_qa.get("qa_pairs", {}) if teacher_qa else {}
+            
+            # Handle both dictionary and list formats for teacher Q&A
+            if isinstance(teacher_pairs, dict):
+                for key, value in teacher_pairs.items():
+                    if key.startswith("Question#"):
+                        q_num = int(key.replace("Question#", ""))
+                        answer_key = f"Answer#{q_num}"
                         teacher_qa_map[q_num] = {
-                            "question": pair.get("question", ""),
-                            "answer": pair.get("answer", "")
+                            "question": value,
+                            "answer": teacher_pairs.get(answer_key, "")
                         }
+            elif isinstance(teacher_pairs, list):
+                for pair in teacher_pairs:
+                    if isinstance(pair, dict):
+                        q_num = pair.get("question_number")
+                        if q_num:
+                            teacher_qa_map[q_num] = {
+                                "question": pair.get("question", ""),
+                                "answer": pair.get("answer", "")
+                            }
             
             # Enhance questions with text (while preserving all original data)
             for question in questions:
@@ -852,6 +879,9 @@ async def get_submission_details(
                 if q_num in qa_map:
                     question["question_text"] = qa_map[q_num].get("question", "")
                     question["student_answer"] = qa_map[q_num].get("answer", "")
+                    # Add question scores if available
+                    scores = question.get("scores", {})
+                    question["question_score"] = scores.get("total", {}).get("score", 0)
                 
                 # Add teacher's question if available
                 if q_num in teacher_qa_map:
@@ -1080,6 +1110,7 @@ async def get_total_scores(
                 
                 scores = {
                     "student_id": student.student_id,
+                    "id": student.id,
                     "name": student.full_name,
                     "batch": student.batch,
                     "department": student.department,
@@ -1111,6 +1142,7 @@ async def get_total_scores(
                     scores = {
                         "student_id": student.student_id,
                         "name": student.full_name,
+                        "id": student.id,
                         "batch": student.batch,
                         "department": student.department,
                         "section": student.section,
@@ -1135,6 +1167,8 @@ async def get_total_scores(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch scores: {str(e)}")
+
+
 
 @router.get("/teacher/course/{course_id}/assignment/{assignment_id}/student/{student_id}/evaluation", response_model=dict)
 async def get_student_evaluation(
@@ -1263,6 +1297,7 @@ async def get_student_evaluation(
                     "context_score": 0,
                     "ai_score": 0,
                     "grammar_score": 0,
+                    "question_score": 0,
                     "feedback": ""
                 })
         
@@ -1335,6 +1370,7 @@ async def get_student_evaluation(
                 "context_score": scores.get("context", {}).get("score", 0),
                 "ai_score": scores.get("ai_detection", {}).get("score", 0),
                 "grammar_score": scores.get("grammar", {}).get("score", 0),
+                "question_score": scores.get("total", {}).get("score", 0),  # Add this field
                 "feedback": feedback_content
             })
         
