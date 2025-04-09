@@ -686,6 +686,9 @@ async def get_assignment_result(
             q_key = f"Question#{q_num}"
             a_key = f"Answer#{q_num}"
             
+            # Get question total score (newly added)
+            question_score = scores.get("total", {}).get("score", 0)
+            
             detailed_questions.append({
                 "question_number": q_num,
                 "question_text": qa_pairs.get(q_key, ""),
@@ -694,12 +697,27 @@ async def get_assignment_result(
                 "context_score": scores.get("context", {}).get("score", 0),
                 "ai_score": scores.get("ai_detection", {}).get("score", 0),
                 "grammar_score": scores.get("grammar", {}).get("score", 0),
+                "question_score": question_score,  # Added question total score
                 "feedback": feedback_content
             })
 
         # Get overall scores
         overall_scores = evaluation_data.get("overall_scores", {})
         total_score = overall_scores.get("total", {}).get("score", 0) if overall_scores else 0
+        
+        # Get assignment details for total grade
+        assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+        if not assignment:
+            raise HTTPException(
+                status_code=404,
+                detail="Assignment not found"
+            )
+        
+        total_assignment_grade = assignment.grade
+        
+        # Calculate percentage score
+        percentage_score = (total_score / total_assignment_grade * 100) if total_assignment_grade > 0 else 0
+        percentage_score = round(percentage_score, 2)
         
         # Get overall feedback
         overall_feedback_obj = evaluation_data.get("overall_feedback", {})
@@ -717,19 +735,13 @@ async def get_assignment_result(
         if total_score == 0 and any(q["plagiarism_score"] > 0.7 for q in detailed_questions):
             feedback = "Your total score is 0 because plagiarism was detected in your submission."
 
-        assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
-        if not assignment:
-            raise HTTPException(
-                status_code=404,
-                detail="Assignment not found"
-            )
-
         result_data = {
             "submission_id": submission.id,
             "submitted_at": submission.submitted_at.strftime("%Y-%m-%d %H:%M"),
             "pdf_url": submission.submission_pdf_url,
             "total_score": total_score,
-            "total_grade": assignment.grade,
+            "total_assignment_grade": total_assignment_grade,  # Added total possible grade
+            "percentage_score": percentage_score,  # Added percentage score
             "questions": detailed_questions,
             "feedback": feedback,
             "scores": {

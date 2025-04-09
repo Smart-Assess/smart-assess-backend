@@ -1199,7 +1199,7 @@ async def get_student_evaluation(
             status_code=404,
             detail="Assignment not found"
         )
-
+    total_assignment_grade = assignment.grade
     submission = db.query(AssignmentSubmission).filter(
         AssignmentSubmission.assignment_id == assignment_id,
         AssignmentSubmission.student_id == student_id
@@ -1307,6 +1307,11 @@ async def get_student_evaluation(
         # Process overall feedback
         overall_feedback = evaluation.feedback or ""
         
+        # Calculate percentage score
+        total_score = float(evaluation.total_score or 0.0)
+        percentage_score = (total_score / total_assignment_grade * 100) if total_assignment_grade > 0 else 0
+        percentage_score = round(percentage_score, 2)
+        
         # Build response with consistent format
         result_data = {
             "submission_id": submission.id,
@@ -1321,7 +1326,9 @@ async def get_student_evaluation(
                 "section": student.section,
                 "image": student.image_url
             },
-            "total_score": float(evaluation.total_score or 0.0),
+            "total_score": total_score,
+            "total_assignment_grade": total_assignment_grade, # Add assignment grade
+            "percentage_score": percentage_score, # Add percentage score
             "plagiarism_score": float(evaluation.plagiarism_score or 0.0),
             "ai_detection_score": float(evaluation.ai_detection_score or 0.0),
             "grammar_score": float(evaluation.grammar_score or 0.0),
@@ -1370,9 +1377,16 @@ async def get_student_evaluation(
                 "context_score": scores.get("context", {}).get("score", 0),
                 "ai_score": scores.get("ai_detection", {}).get("score", 0),
                 "grammar_score": scores.get("grammar", {}).get("score", 0),
-                "question_score": scores.get("total", {}).get("score", 0),  # Add this field
+                "question_score": scores.get("total", {}).get("score", 0),  # Include question total score
                 "feedback": feedback_content
             })
+        
+        # Get the total score from MongoDB 
+        total_score = overall_scores.get("total", {}).get("score", 0)
+        
+        # Calculate percentage score
+        percentage_score = (total_score / total_assignment_grade * 100) if total_assignment_grade > 0 else 0
+        percentage_score = round(percentage_score, 2)
         
         # Build response with consistent format
         result_data = {
@@ -1388,7 +1402,9 @@ async def get_student_evaluation(
                 "section": student.section,
                 "image": student.image_url
             },
-            "total_score": overall_scores.get("total", {}).get("score", 0),
+            "total_score": total_score,
+            "total_assignment_grade": total_assignment_grade, # Add assignment grade
+            "percentage_score": percentage_score, # Add percentage score
             "plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0),
             "ai_score": overall_scores.get("ai_detection", {}).get("score", 0),
             "grammar_score": overall_scores.get("grammar", {}).get("score", 0),
@@ -1400,7 +1416,8 @@ async def get_student_evaluation(
         "success": True,
         "status": 200,
         "result": result_data
-    }  
+    }
+
 
 @router.delete("/teacher/course/{course_id}/assignment/{assignment_id}", response_model=dict)
 async def delete_assignment(
