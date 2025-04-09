@@ -13,14 +13,28 @@ class AssignmentScoreCalculator:
         self.ai_detection_penalty = 0.2  # 20% penalty
         self.grammar_penalty = 0.2  # 20% penalty
         self.max_penalty = 0.7  # Maximum penalty for any category (70%)
+        
+        # Thresholds for zeroing out scores
+        self.plagiarism_threshold = 0.9  # If plagiarism score is above 90%, zero the score
+        self.ai_threshold = 0.9  # If AI score is above 90%, zero the score
 
     def calculate_question_score(self, context_score, plagiarism_score=None, ai_score=None, grammar_score=None):
+        # Zero out the score if plagiarism or AI detection is above threshold
+        if plagiarism_score is not None and plagiarism_score >= self.plagiarism_threshold:
+            print(f"Zeroing score due to high plagiarism: {plagiarism_score}")
+            return 0.0
+            
+        if ai_score is not None and ai_score >= self.ai_threshold:
+            print(f"Zeroing score due to high AI detection: {ai_score}")
+            return 0.0
+        
+        # Otherwise continue with normal penalty calculation
         base_score = context_score 
         total_penalty = 0
         
         # Calculate penalties from plagiarism, AI, grammar scores
         if plagiarism_score is not None:
-            plagiarism_penalty = (1 - plagiarism_score) * self.plagiarism_penalty
+            plagiarism_penalty = plagiarism_score * self.plagiarism_penalty
             total_penalty += plagiarism_penalty
             
         if ai_score is not None:
@@ -63,8 +77,9 @@ class AssignmentScoreCalculator:
             plagiarism_score = scores.get("plagiarism_score", 0)
             ai_score = scores.get("ai_score", 0)
             grammar_score = scores.get("grammar_score", 0)
-            
-            # Add to totals
+            question_total = scores.get("total_score", None)
+                
+            # Add to totals for metric averages
             context_sum += context_score
             if context_score > 0:
                 has_context = True
@@ -81,15 +96,20 @@ class AssignmentScoreCalculator:
             if grammar_score > 0:
                 has_grammar = True
             
-            # Calculate question score based on all available metrics
-            question_score = self.calculate_question_score(
-                context_score=context_score,
-                plagiarism_score=plagiarism_score,
-                ai_score=ai_score,
-                grammar_score=grammar_score
-            )
+            # If the question already has a calculated total score, use that
+            # Otherwise calculate it
+            if question_total is not None:
+                question_score = question_total
+            else:
+                # Calculate question score based on all available metrics
+                question_score = self.calculate_question_score(
+                    context_score=context_score,
+                    plagiarism_score=plagiarism_score,
+                    ai_score=ai_score,
+                    grammar_score=grammar_score
+                )
             
-            # Add to total score
+            # Add to total score - by this point, already zeroed out if needed
             total_score += question_score
         
         # Calculate per-question share of total grade
@@ -111,5 +131,4 @@ class AssignmentScoreCalculator:
             "avg_plagiarism_score": round(avg_plagiarism, 4),
             "avg_ai_score": round(avg_ai, 4),
             "avg_grammar_score": round(avg_grammar, 4)
-        }     
-
+        }

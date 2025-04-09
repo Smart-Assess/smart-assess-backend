@@ -719,6 +719,10 @@ async def get_assignment_result(
         percentage_score = (total_score / total_assignment_grade * 100) if total_assignment_grade > 0 else 0
         percentage_score = round(percentage_score, 2)
         
+        # Calculate per-question marks
+        question_count = len(detailed_questions)
+        question_total_marks = round(total_assignment_grade / question_count, 2) if question_count > 0 else 0
+        
         # Get overall feedback
         overall_feedback_obj = evaluation_data.get("overall_feedback", {})
         feedback = ""
@@ -740,9 +744,10 @@ async def get_assignment_result(
             "submitted_at": submission.submitted_at.strftime("%Y-%m-%d %H:%M"),
             "pdf_url": submission.submission_pdf_url,
             "total_score": total_score,
-            "total_assignment_grade": total_assignment_grade,  # Added total possible grade
-            "percentage_score": percentage_score,  # Added percentage score
-            "questions": detailed_questions,
+            "total_assignment_grade": total_assignment_grade,  # Total possible grade
+            "percentage_score": percentage_score,  # Percentage score
+            "question_total_marks": question_total_marks,  # Add per-question marks
+            "questions": sorted(detailed_questions, key=lambda x: x["question_number"]),
             "feedback": feedback,
             "scores": {
                 "plagiarism": overall_scores.get("plagiarism", {}).get("score", 0) if overall_scores else (evaluation.plagiarism_score if evaluation else None),

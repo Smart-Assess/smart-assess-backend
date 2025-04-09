@@ -1270,6 +1270,8 @@ async def get_student_evaluation(
         evaluation = db.query(AssignmentEvaluation).filter(
             AssignmentEvaluation.submission_id == submission.id
         ).first()
+        question_count = len(detailed_questions)
+        question_total_marks = round(total_assignment_grade / question_count, 2) if question_count > 0 else 0
         
         if not evaluation:
             raise HTTPException(
@@ -1333,6 +1335,7 @@ async def get_student_evaluation(
             "ai_detection_score": float(evaluation.ai_detection_score or 0.0),
             "grammar_score": float(evaluation.grammar_score or 0.0),
             "feedback": overall_feedback,
+            "question_total_marks": question_total_marks,
             "questions": detailed_questions
         }
     else:
@@ -1387,6 +1390,8 @@ async def get_student_evaluation(
         # Calculate percentage score
         percentage_score = (total_score / total_assignment_grade * 100) if total_assignment_grade > 0 else 0
         percentage_score = round(percentage_score, 2)
+        question_count = len(detailed_questions)
+        question_total_marks = round(total_assignment_grade / question_count, 2) if question_count > 0 else 0
         
         # Build response with consistent format
         result_data = {
@@ -1405,6 +1410,7 @@ async def get_student_evaluation(
             "total_score": total_score,
             "total_assignment_grade": total_assignment_grade, # Add assignment grade
             "percentage_score": percentage_score, # Add percentage score
+            "question_total_marks": question_total_marks,  # Add question total marks
             "plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0),
             "ai_score": overall_scores.get("ai_detection", {}).get("score", 0),
             "grammar_score": overall_scores.get("grammar", {}).get("score", 0),
