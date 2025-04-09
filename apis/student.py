@@ -7,7 +7,9 @@ from utils.dependencies import get_db
 from apis.auth import get_current_admin
 from utils.s3 import delete_from_s3, upload_to_s3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime as dt
+from datetime import timezone
+from tempfile import NamedTemporaryFile
 
 router = APIRouter()
 
@@ -134,7 +136,7 @@ async def submit_assignment(
         raise HTTPException(status_code=404, detail="Assignment not found")
         
     # Check if deadline has passed
-    current_time = datetime.datetime.now()
+    current_time = dt.now()
     if current_time > assignment.deadline:
         raise HTTPException(
             status_code=403,
@@ -161,7 +163,7 @@ async def submit_assignment(
     
     # Generate a unique identifier
     unique_id = uuid.uuid4()
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    timestamp = dt.now().strftime("%Y%m%d%H%M%S")
     
     # Check and remove existing submission
     existing_submission = db.query(AssignmentSubmission).filter(
@@ -248,7 +250,7 @@ async def update_assignment_submission(
         raise HTTPException(status_code=404, detail="Assignment not found")
     
     # Check if deadline has passed
-    current_time = datetime.datetime.now()
+    current_time = dt.now()
     if current_time > assignment.deadline:
         raise HTTPException(
             status_code=403,
@@ -287,9 +289,7 @@ async def update_assignment_submission(
             detail="File must be a PDF"
         )
     
-    # Create temporary file
-    import os
-    from tempfile import NamedTemporaryFile
+    
     from evaluations.base_extractor import PDFQuestionAnswerExtractor
     
     temp_file_path = None
@@ -317,12 +317,10 @@ async def update_assignment_submission(
                 detail="Submission PDF is not in the correct format. It must contain 'Question#' and 'Answer#' sections."
             )
         
-        # Generate a unique identifier for the new file
-        import uuid
-        from datetime import datetime
+        
         
         unique_id = uuid.uuid4()
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        timestamp = dt.now().strftime("%Y%m%d%H%M%S")
         file_extension = submission_pdf.filename.split('.')[-1]
         new_file_name = f"{current_student.id}_{unique_id}_{timestamp}.{file_extension}"
         
@@ -361,7 +359,7 @@ async def update_assignment_submission(
             "submission_id": existing_submission.id,
             "pdf_file": temp_file_path,
             "qa_pairs": parsed_dict,
-            "extracted_at": datetime.now(timezone.utc)
+            "extracted_at": dt.now(timezone.utc)
         }
         
         mongo_db.db['qa_extractions'].update_one(
@@ -377,7 +375,7 @@ async def update_assignment_submission(
         
         # Update PostgreSQL submission
         existing_submission.submission_pdf_url = pdf_url
-        existing_submission.submitted_at = datetime.now()
+        existing_submission.submitted_at = dt.now()
         
         # Delete any existing evaluation for this submission
         existing_evaluation = db.query(AssignmentEvaluation).filter(
