@@ -85,8 +85,52 @@ class AssignmentEvaluator:
         # Extract questions and answers from PDFs
         self.extract_qa_pairs(pdf_files, submission_ids=submission_ids)
         teacher_questions, questions_answers_by_submission = self.fetch_qa_pairs()
-    
-        # Run context scoring
+
+        # Process teacher questions to get a clear list of question numbers
+        teacher_question_numbers = []
+        for key in teacher_questions:
+            if key.startswith("Question#"):
+                question_number = int(key.replace("Question#", ""))
+                teacher_question_numbers.append(question_number)
+        
+        teacher_question_numbers.sort()  # Sort question numbers
+        print(f"Teacher questions found: {teacher_question_numbers}")
+        
+        # For each submission, ensure all teacher questions exist
+        # Even if the student left them blank
+        for submission_id, qa_pairs in questions_answers_by_submission.items():
+            student_question_numbers = []
+            for key in qa_pairs:
+                if key.startswith("Question#"):
+                    question_number = int(key.replace("Question#", ""))
+                    student_question_numbers.append(question_number)
+            
+            student_question_numbers.sort()  # Sort question numbers
+            print(f"Student {submission_id} questions found: {student_question_numbers}")
+            
+            # Check for missing questions
+            for q_num in teacher_question_numbers:
+                question_key = f"Question#{q_num}"
+                answer_key = f"Answer#{q_num}"
+                
+                if question_key not in qa_pairs:
+                    print(f"Adding missing question {q_num} to submission {submission_id}")
+                    # Add the question from teacher's version
+                    qa_pairs[question_key] = teacher_questions[question_key]
+                    qa_pairs[answer_key] = ""  # Empty answer
+                    
+                    # Update MongoDB with the added question
+                    mongo_db.db['qa_extractions'].update_one(
+                        {
+                            "course_id": self.course_id,
+                            "assignment_id": self.assignment_id,
+                            "submission_id": submission_id,
+                            "is_teacher": False
+                        },
+                        {"$set": {"qa_pairs": qa_pairs}}
+                    )
+
+        # Now proceed with context scoring
         context_results = self.context_scorer.run(teacher_questions, questions_answers_by_submission, submission_ids, total_score=total_grade)
         print(f"Context scoring completed: {len(context_results['results'])} submissions processed")
         
@@ -139,9 +183,28 @@ class AssignmentEvaluator:
                         if key.startswith("Answer#"):
                             q_num = int(key.split('#')[1])
                             
-                            # Skip empty answers
+                            # Check for empty answers explicitly
                             if not text or len(text.strip()) < 5:
-                                continue
+                                print(f"Empty answer {key} for submission {submission_id} - assigning zero grammar score")
+                                
+                                # Store zero grammar score for this empty answer
+                                mongo_db.db['evaluation_results'].update_one(
+                                    {
+                                        "course_id": self.course_id,
+                                        "assignment_id": self.assignment_id,
+                                        "submission_id": submission_id,
+                                        "questions.question_number": q_num
+                                    },
+                                    {
+                                        "$set": {
+                                            "questions.$.scores.grammar": {
+                                                "score": 0.0,
+                                                "evaluated_at": datetime.now(timezone.utc)
+                                            }
+                                        }
+                                    }
+                                )
+                                continue  # Skip grammar checking for empty answers
                             
                             # Evaluate grammar with delay
                             print(f"Checking grammar for {submission_id} - Question {q_num}")
@@ -179,14 +242,14 @@ class AssignmentEvaluator:
                     if cursor:
                         questions = cursor.get("questions", [])
                         total_grammar = 0
-                        count = 0
+                        count = len(questions)  # Count ALL questions, even unanswered ones
                         
                         for q in questions:
                             grammar_score = q.get("scores", {}).get("grammar", {}).get("score", 0)
-                            if grammar_score > 0:
-                                total_grammar += grammar_score
-                                count += 1
+                            # Include ALL questions in calculation, even with zero score
+                            total_grammar += grammar_score
                         
+                        # Calculate average - now properly handling empty answers
                         avg_grammar = total_grammar / count if count > 0 else 0
                         print(f"Overall grammar score for {submission_id}: {avg_grammar}")
                         

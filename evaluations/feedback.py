@@ -79,6 +79,20 @@ Target 1-2 key areas for improvement based on the weakest scores."""
     def generate_question_feedback(self, q_num: int, scores: Dict[str, Any], 
                                   question_text: str, student_answer: str, delay: float = None) -> str:
         """Generate concise feedback for a specific question using Groq directly"""
+        # Check for empty answer first
+        if not student_answer or len(student_answer.strip()) < 3:
+            return "This question was not answered. No points were awarded."
+        
+        # Check for high plagiarism score - notify in feedback
+        plagiarism_score = scores.get("plagiarism", {}).get("score", 0)
+        if plagiarism_score >= 0.9:  # 90% or higher
+            return "This answer appears to be plagiarized. When plagiarism exceeds 90%, no points are awarded for the question. Please submit original work."
+        
+        # Check for high AI detection score - notify in feedback
+        ai_score = scores.get("ai_detection", {}).get("score", 0)
+        if ai_score >= 0.9:  # 90% or higher
+            return "This answer appears to be AI-generated. When AI detection exceeds 90%, no points are awarded for the question. Please submit your own work."
+        
         # Apply delay to avoid rate limiting
         delay = delay if delay is not None else self.default_delay
         time.sleep(delay)
@@ -87,10 +101,10 @@ Target 1-2 key areas for improvement based on the weakest scores."""
         formatted_prompt = self.question_prompt.format(
             question_text=question_text,
             student_answer=student_answer,
-            context_score=scores.get("context", {}).get("score", "N/A"),
-            plagiarism_score=scores.get("plagiarism", {}).get("score", "N/A"),
-            ai_score=scores.get("ai_detection", {}).get("score", "N/A"),
-            grammar_score=scores.get("grammar", {}).get("score", "N/A")
+            context_score=f"{scores.get('context', {}).get('score', 0) * 100:.2f}%",  # Convert to percentage
+            plagiarism_score=f"{scores.get('plagiarism', {}).get('score', 0) * 100:.2f}%",
+            ai_score=f"{scores.get('ai_detection', {}).get('score', 0) * 100:.2f}%",
+            grammar_score=f"{scores.get('grammar', {}).get('score', 0) * 100:.2f}%"
         )
         
         try:

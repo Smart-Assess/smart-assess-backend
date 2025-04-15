@@ -41,6 +41,16 @@ class PlagiarismChecker:
                 answer_key = f"Answer#{question_key.split('#')[1]}"
                 current_answer = current_qa_dict.get(answer_key, "").strip()
                 
+                # Handle empty answers explicitly
+                if not current_answer or len(current_answer) < 3:
+                    print(f"Empty or very short answer for {pdf_file} - {answer_key} - assigning zero plagiarism score")
+                    self.similarity_results[pdf_file][question_key] = {
+                        "Comparisons": {},
+                        "max_similarity": 0.0,
+                        "copied_sentence": ""
+                    }
+                    continue  # Skip further processing for empty answers
+                
                 question_result = {
                     "Comparisons": {},
                     "max_similarity": 0.0,
