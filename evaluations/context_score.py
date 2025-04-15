@@ -47,6 +47,11 @@ class ContextScorer:
         self.RELEVANCE_WEIGHT = 0.1
 
     def calculate_score(self, question: str, answer: str, total_score_per_question: float) -> float:
+        # Check for empty or very short answers first
+        if not answer or len(answer.strip()) < 5:
+            print(f"Empty or very short answer detected - assigning zero score")
+            return 0.0
+            
         # Get reference from RAG
         rag_results = self.rag.search(question)
         if not rag_results:
@@ -94,18 +99,23 @@ class ContextScorer:
             q_key = f"Question#{q_num}"
             a_key = f"Answer#{q_num}"
             
-            if q_key in teacher_questions and a_key in qa_pairs:
+            if q_key in teacher_questions:
                 question = teacher_questions[q_key]
-                answer = qa_pairs[a_key]
+                answer = qa_pairs.get(a_key, "")  # Default to empty string if missing
                 
-                if question and answer:
+                # Always process the question, even with empty answer
+                if not answer or len(answer.strip()) < 5:
+                    print(f"Question {q_num}: Empty or very short answer - assigning zero score")
+                    score = 0.0
+                else:
                     score = self.calculate_score(question, answer, score_per_question)
-                    total_context_score += score
                     
-                    question_scores.append({
-                        "question_key": q_key,
-                        "context_score": score
-                    })
+                total_context_score += score
+                
+                question_scores.append({
+                    "question_key": q_key,
+                    "context_score": score
+                })
         
         return {
             "questions": question_scores,

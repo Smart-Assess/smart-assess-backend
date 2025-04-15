@@ -89,8 +89,9 @@ class GrammarChecker:
     
     def evaluate(self, text, delay=0):
         """Evaluate text for grammar correctness"""
-        if not text or len(text.strip()) < 10:
-            return text, 1.0  # Perfect score for very short text
+        if not text or len(text.strip()) < 3:
+            logger.info("Empty or very short answer - assigning zero grammar score")
+            return text, 0.0  # Zero score for empty answers, not 1.0
             
         # If we already know the service is unavailable, skip API call
         if not self.service_available:

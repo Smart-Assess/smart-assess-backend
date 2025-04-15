@@ -58,8 +58,10 @@ class AIDetector:
 
     def detect_ai_content(self, text, delay=0):
         """Call the AI detection service to check if text is AI-generated"""
-        if not text or len(text.strip()) < 10:  # Skip very short texts
-            return 0
+        # Check for empty answers first
+        if not text or len(text.strip()) < 2:  # Skip very short texts
+            logger.info("Empty or very short answer - assigning zero AI detection score")
+            return 0  # Zero score for empty answers
             
         # If service is known to be unavailable, return a simulated score
         if not self.service_available:
