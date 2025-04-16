@@ -16,8 +16,7 @@ class GrammarChecker:
         
         # API tokens - having multiple allows for fallback
         self.api_tokens = [
-            # os.getenv("HUGGINGFACE_TOKEN_1", "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"),
-            os.getenv("HUGGINGFACE_TOKEN_2", "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")
+            os.getenv("HUGGINGFACE_TOKEN_2", "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")
         ]
         self.current_token_index = 0
         
@@ -145,3 +144,9 @@ class GrammarChecker:
         union = len(original_words.union(corrected_words))
         
         return intersection / union
+    
+if __name__ =="__main__":
+    grammar  = GrammarChecker()
+    data = grammar.evaluate("This is a test sentence with a gramatical error.", delay=0)
+    print(data)
+    
