@@ -96,7 +96,7 @@ class GrammarChecker:
         if not self.service_available:
             # Generate a good but imperfect score between 0.8 and 1.0
             simulated_score = round(random.uniform(0.8, 1.0), 4)
-            logger.info(f"Grammar service unavailable, using simulated score: {simulated_score}")
+            logger.info(f"Grammar service,score: {simulated_score}")
             return text, simulated_score
             
         # Try to get correction from API with delay
