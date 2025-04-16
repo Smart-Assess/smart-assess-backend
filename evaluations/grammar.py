@@ -47,11 +47,12 @@ class GrammarChecker:
             time.sleep(delay)
             
         try:
+            # Increase timeout from 2 to 5 seconds to avoid timeouts
             response = requests.post(
                 self.api_url,
                 headers=self.headers,
                 json={"inputs": text},
-                timeout=2
+                timeout=5  # Increased timeout
             )
             
             # Check for various error conditions
@@ -67,7 +68,7 @@ class GrammarChecker:
                 logger.warning(f"Grammar API returned {response.status_code}, rotating token and retrying")
                 time.sleep(1)  # Brief pause
                 self._rotate_token()
-                return self.query_api(text, attempt + 1)
+                return self.query_api(text, attempt + 1, 0)  # No additional delay on retry
                 
             # For other errors, log and return None
             else:
@@ -84,29 +85,136 @@ class GrammarChecker:
         except Exception as e:
             logger.error(f"Exception during grammar API call: {str(e)}")
             self._rotate_token()
-            return self.query_api(text, attempt + 1)
+            time.sleep(1)  # Add a pause before retrying
+            return self.query_api(text, attempt + 1, 0)  # No additional delay on retry
     
     def evaluate(self, text, delay=0):
-        """Evaluate text for grammar correctness"""
+        """Evaluate text for grammar correctness with chunking for longer texts"""
         if not text or len(text.strip()) < 3:
             logger.info("Empty or very short answer - assigning zero grammar score")
-            return text, 0.0  # Zero score for empty answers, not 1.0
+            return text, 0.0  # Zero score for empty answers
             
         # If we already know the service is unavailable, skip API call
         if not self.service_available:
-            # Generate a good but imperfect score between 0.8 and 1.0
             simulated_score = round(random.uniform(0.8, 1.0), 4)
-            logger.info(f"Grammar service,score: {simulated_score}")
+            logger.info(f"Grammar service unavailable, using simulated score: {simulated_score}")
             return text, simulated_score
+        
+        # Define maximum chunk size (characters)
+        MAX_CHUNK_SIZE = 90  # Reduced slightly for safety
+        
+        # For short texts, process normally
+        if len(text) <= MAX_CHUNK_SIZE:
+            return self._process_single_chunk(text, delay)
+        
+        # For longer texts, split into chunks and process each
+        logger.info(f"Text length {len(text)} exceeds chunk size, splitting into chunks")
+        
+        # First, preserve the original structure by identifying paragraph breaks
+        paragraphs = re.split(r'(\n\s*\n+)', text)
+        processed_paragraphs = []
+        all_scores = []
+        all_lengths = []
+        
+        for p_idx, paragraph in enumerate(paragraphs):
+            # If this is just whitespace/newlines, preserve it exactly
+            if not paragraph.strip():
+                processed_paragraphs.append(paragraph)
+                continue
+                
+            # Process actual text paragraphs
+            if len(paragraph) <= MAX_CHUNK_SIZE:
+                corrected, score = self._process_single_chunk(paragraph, delay if p_idx > 0 else 0)
+                processed_paragraphs.append(corrected)
+                all_scores.append(score)
+                all_lengths.append(len(paragraph))
+            else:
+                # Split longer paragraphs into chunks
+                chunks = self._split_into_chunks(paragraph, MAX_CHUNK_SIZE)
+                logger.info(f"Split paragraph into {len(chunks)} chunks")
+                
+                corrected_chunks = []
+                for i, chunk in enumerate(chunks):
+                    # Add delay between chunks
+                    if (i > 0 or p_idx > 0) and delay > 0:
+                        time.sleep(delay)
+                    
+                    # Process chunk
+                    corrected_chunk, chunk_score = self._process_single_chunk(chunk, 0)
+                    corrected_chunks.append(corrected_chunk)
+                    all_scores.append(chunk_score)
+                    all_lengths.append(len(chunk))
+                
+                # Join chunks within paragraph
+                processed_paragraphs.append(' '.join(corrected_chunks))
+        
+        # Join processed paragraphs, preserving original paragraph breaks
+        corrected_text = ''.join(processed_paragraphs)
+        
+        # Calculate weighted average score
+        if not all_scores:
+            return text, 0.9  # Default fallback
+        
+        # Weight scores by text length
+        total_length = sum(all_lengths)
+        weighted_score = sum(
+            score * (length / total_length)
+            for score, length in zip(all_scores, all_lengths)
+        )
+        
+        logger.info(f"Final weighted grammar score: {weighted_score}")
+        
+        return corrected_text, round(weighted_score, 4)
+
+    def _split_into_chunks(self, text, max_size):
+        """Split text into chunks, trying to preserve sentence boundaries"""
+        chunks = []
+        
+        # Find all sentence boundaries (periods, question marks, exclamation points)
+        sentence_ends = [m.end() for m in re.finditer(r'[.!?]\s+', text)]
+        
+        # Add the end of the text as a final boundary
+        sentence_ends.append(len(text))
+        
+        start = 0
+        
+        while start < len(text):
+            # Find the last sentence boundary that fits in the current chunk
+            chunk_end = start
             
+            for end in sentence_ends:
+                if end - start <= max_size:
+                    chunk_end = end
+                else:
+                    break
+            
+            # If no sentence boundary found, or it's the same as start, 
+            # just cut at max_size or end of text
+            if chunk_end == start:
+                chunk_end = min(start + max_size, len(text))
+            
+            # Extract chunk and clean it
+            chunk = text[start:chunk_end].strip()
+            
+            # Only add non-empty chunks
+            if chunk:
+                chunks.append(chunk)
+            
+            # Move to next chunk
+            start = chunk_end
+        
+        return chunks
+    
+    def _process_single_chunk(self, text, delay=0):
+        """Process a single chunk of text"""
         # Try to get correction from API with delay
-        logger.info(f"Checking grammar for text of length {len(text)}")
-        result = self.query_api(text[:1000], delay=delay) 
+        logger.info(f"Checking grammar for chunk with length {len(text)}")
+        result = self.query_api(text, delay=delay) 
         
         if result is None:
             # API failed, provide a reasonable high score as default
             fallback_score = round(random.uniform(0.8, 1.0), 4)
-            logger.warning(f"Using fallback grammar score: {fallback_score}")
+            logger.warning(f"Using fallback grammar score for chunk: {fallback_score}")
             return text, fallback_score
             
         # Process API result to get corrected text
@@ -117,7 +225,7 @@ class GrammarChecker:
             similarity = self._calculate_similarity(text, corrected_text)
             grammar_score = max(0.5, min(1.0, similarity))  # Keep score between 0.5 and 1.0
             
-            logger.info(f"Grammar score calculated: {grammar_score}")
+            logger.info(f"Grammar score for chunk: {grammar_score}")
             return corrected_text, grammar_score
         else:
             # Unexpected API response format
@@ -147,6 +255,17 @@ class GrammarChecker:
     
 if __name__ =="__main__":
     grammar  = GrammarChecker()
-    data = grammar.evaluate("This is a test sentence with a gramatical error.", delay=0)
+    data = grammar.evaluate("""
+                            Rain Cloud: A model where data is stored in natural clouds and accessed during rainfall.
+
+
+Fire Cloud: Uses heat-based servers to process data faster.
+
+
+Wind Cloud: Relies on wind patterns to transfer data wirelessly across continents.
+
+
+Ghost Cloud: A stealth model where data is invisible to both users and providers, maximizing mystery over usability.
+
+                            """, delay=0)
     print(data)
-    
