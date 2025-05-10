@@ -161,6 +161,20 @@ async def submit_assignment(
             detail="File must be a PDF"
         )
     
+    # Check file size limit (8 MB)
+    MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB in bytes
+    contents = await submission_pdf.read()
+    file_size = len(contents)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size exceeds the limit of 8MB"
+        )
+    
+    # Reset file position to beginning for later processing
+    await submission_pdf.seek(0)
+    
     # Generate a unique identifier
     unique_id = uuid.uuid4()
     timestamp = dt.now().strftime("%Y%m%d%H%M%S")
@@ -289,6 +303,19 @@ async def update_assignment_submission(
             detail="File must be a PDF"
         )
     
+    # Check file size limit (8 MB)
+    MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB in bytes
+    contents = await submission_pdf.read()
+    file_size = len(contents)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size exceeds the limit of 8MB"
+        )
+    
+    # Reset file position to beginning for later processing
+    await submission_pdf.seek(0)
     
     from evaluations.base_extractor import PDFQuestionAnswerExtractor
     

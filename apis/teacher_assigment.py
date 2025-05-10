@@ -23,6 +23,7 @@ from apis.teacher_course import sanitize_folder_name, get_teacher_rag, db_mongo,
 import json
 from evaluations.base_extractor import PDFQuestionAnswerExtractor   
 from fastapi import APIRouter, UploadFile, Form, File, HTTPException, Depends
+from utils.pdf_report import PDFReportGenerator
 
 
 import os
@@ -152,6 +153,19 @@ async def create_assignment(
             status_code=400,
             detail="Question file must be a PDF"
         )
+
+    # Check file size limit (10 MB)
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB in bytes
+    contents = await question_pdf.read()
+    file_size = len(contents)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File size exceeds the limit of 10MB"
+        )
+    
+    await question_pdf.seek(0)
 
     # Parse the deadline string into a datetime object
     try:
@@ -626,7 +640,7 @@ async def evaluate_submissions(
             # Wait briefly to ensure MongoDB updates have completed
             time.sleep(0.5)
 
-            # Collect evaluation results with proper feedback handling
+            # Collect evaluation results and generate reports
             for submission_id, temp_path in submission_paths.items():
                 # We need to find the evaluation by the submission_id
                 submission_data = db_mongo.evaluation_results.find_one({
@@ -659,10 +673,37 @@ async def evaluate_submissions(
                     elif isinstance(feedback_data, str):
                         feedback_content = feedback_data
                     
-                    # Debug output
-                    print(f"Submission ID {submission_id} - Overall scores: {overall_scores}")
-                    print(f"Submission ID {submission_id} - Feedback: {feedback_content}")
+                    # Create PDF report with MongoDB data
+                    report_generator = PDFReportGenerator()
                     
+                    # Generate filename for the report
+                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                    report_filename = f"report_{student.student_id}_{timestamp}.pdf"
+                    
+                    # Process the submission - download, append report, upload
+                    report_url = report_generator.process_submission_with_report(
+                        mongo_data=submission_data,
+                        student_pdf_url=submission.submission_pdf_url,
+                        total_possible=assignment.grade,
+                        student_name=student.full_name,
+                        course_name=course.name,
+                        assignment_name=assignment.name,
+                        folder_name=f"assignment_reports/{course_id}/{assignment_id}",
+                        output_filename=report_filename
+                    )
+                    
+                    # Update MongoDB with the report URL
+                    if report_url:
+                        db_mongo.evaluation_results.update_one(
+                            {
+                                "course_id": course_id,
+                                "assignment_id": assignment_id,
+                                "submission_id": submission_id
+                            },
+                            {"$set": {"report_url": report_url}}
+                        )
+                    
+                    # Create evaluation result with report URL
                     result = {
                         "name": student.full_name,
                         "batch": student.batch,
@@ -674,7 +715,8 @@ async def evaluate_submissions(
                         "avg_ai_score": overall_scores.get("ai_detection", {}).get("score", 0),
                         "avg_grammar_score": overall_scores.get("grammar", {}).get("score", 0),
                         "feedback": feedback_content,
-                        "image": student.image_url
+                        "image": student.image_url,
+                        "report_url": report_url
                     }
                     
                     # Add result to list
@@ -1123,7 +1165,8 @@ async def get_total_scores(
                     "avg_plagiarism_score": overall_scores.get("plagiarism", {}).get("score", 0.0),
                     "avg_ai_score": overall_scores.get("ai_detection", {}).get("score", 0.0),
                     "avg_grammar_score": overall_scores.get("grammar", {}).get("score", 0.0),
-                    "feedback": feedback_content
+                    "feedback": feedback_content,
+                    "report_url": evaluation_data.get("report_url", ""),
                 }
 
                 total_scores_data.append(scores)
@@ -1154,7 +1197,8 @@ async def get_total_scores(
                         "avg_plagiarism_score": float(evaluation.plagiarism_score or 0.0),
                         "avg_ai_score": float(evaluation.ai_detection_score or 0.0),
                         "avg_grammar_score": float(evaluation.grammar_score or 0.0),
-                        "feedback": evaluation.feedback or ""
+                        "feedback": evaluation.feedback or "",
+                        "report_url": "",  # No report URL in SQL
                     }
                     
                     total_scores_data.append(scores)
@@ -1336,7 +1380,8 @@ async def get_student_evaluation(
             "grammar_score": float(evaluation.grammar_score or 0.0),
             "feedback": overall_feedback,
             "question_total_marks": question_total_marks,
-            "questions": detailed_questions
+            "questions": detailed_questions,
+            "report_url": ""  # No report URL in SQL
         }
     else:
         # Use MongoDB evaluation data (preferred source)
@@ -1415,7 +1460,8 @@ async def get_student_evaluation(
             "ai_score": overall_scores.get("ai_detection", {}).get("score", 0),
             "grammar_score": overall_scores.get("grammar", {}).get("score", 0),
             "feedback": overall_feedback,
-            "questions": sorted(detailed_questions, key=lambda x: x["question_number"])
+            "questions": sorted(detailed_questions, key=lambda x: x["question_number"]),
+            "report_url": evaluation_data.get("report_url", "")
         }
     
     return {
@@ -1527,4 +1573,113 @@ async def delete_assignment(
         raise HTTPException(
             status_code=500, 
             detail=f"Failed to delete assignment: {str(e)}"
+        )
+        
+@router.delete("/teacher/course/{course_id}/assignment/{assignment_id}/submission/{submission_id}", response_model=dict)
+async def delete_student_submission(
+    course_id: int,
+    assignment_id: int,
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin)
+):
+    """Delete a specific student's assignment submission with all related data"""
+    course = db.query(Course).filter(
+        Course.id == course_id,
+        Course.teacher_id == current_teacher.id
+    ).first()
+    
+    if not course:
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found or you don't have access"
+        )
+
+    assignment = db.query(Assignment).filter(
+        Assignment.id == assignment_id,
+        Assignment.course_id == course_id
+    ).first()
+    
+    if not assignment:
+        raise HTTPException(
+            status_code=404,
+            detail="Assignment not found"
+        )
+    
+    # Find the submission
+    submission = db.query(AssignmentSubmission).filter(
+        AssignmentSubmission.id == submission_id,
+        AssignmentSubmission.assignment_id == assignment_id
+    ).first()
+    
+    if not submission:
+        raise HTTPException(
+            status_code=404,
+            detail="Submission not found"
+        )
+    
+    # Get student information for the response
+    student = db.query(Student).filter(Student.id == submission.student_id).first()
+    student_info = {
+        "id": student.id,
+        "student_id": student.student_id,
+        "name": student.full_name
+    } if student else {"id": None, "student_id": None, "name": "Unknown"}
+    
+    try:
+        # Step 1: Delete MongoDB data
+        # Delete evaluation results
+        mongo_eval_result = db_mongo.evaluation_results.delete_many({
+            "course_id": course_id,
+            "assignment_id": assignment_id,
+            "$or": [
+                {"submission_id": submission_id},
+                {"pdf_file": submission_id}
+            ]
+        })
+        
+        # Delete Q&A extractions
+        mongo_qa_result = db_mongo.qa_extractions.delete_many({
+            "course_id": course_id,
+            "assignment_id": assignment_id,
+            "is_teacher": False,
+            "$or": [
+                {"submission_id": submission_id},
+                {"pdf_file": submission_id}
+            ]
+        })
+        
+        # Step 2: Delete S3 file if exists
+        s3_deleted = False
+        if submission.submission_pdf_url:
+            s3_deleted = delete_from_s3(submission.submission_pdf_url)
+        
+        # Step 3: Delete evaluation record from SQL if exists
+        evaluation_deleted = db.query(AssignmentEvaluation).filter(
+            AssignmentEvaluation.submission_id == submission_id
+        ).delete(synchronize_session=False)
+        
+        # Step 4: Delete the submission itself
+        db.delete(submission)
+        db.commit()
+        
+        return {
+            "success": True,
+            "status": 200,
+            "message": "Student submission deleted successfully",
+            "details": {
+                "student": student_info,
+                "submission_id": submission_id,
+                "evaluation_deleted": bool(evaluation_deleted),
+                "mongo_evaluation_deleted": mongo_eval_result.deleted_count > 0 if mongo_eval_result else False,
+                "mongo_qa_deleted": mongo_qa_result.deleted_count > 0 if mongo_qa_result else False,
+                "s3_file_deleted": s3_deleted
+            }
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete submission: {str(e)}"
         )

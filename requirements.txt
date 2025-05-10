@@ -23,3 +23,5 @@ aspose.slides
 pytest-mock 
 pytest-asyncio
 pytest
+fpdf
+matplotlib

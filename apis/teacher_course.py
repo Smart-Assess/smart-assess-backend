@@ -75,6 +75,25 @@ async def create_course(
     db: Session = Depends(get_db),
     current_teacher: Teacher = Depends(get_current_admin),
 ):
+    # Define max file size
+    MAX_FILE_SIZE = 15 * 1024 * 1024  # 15MB per file
+    
+    # Validate file sizes if files are provided
+    if files:
+        for file in files:
+            # Check file size
+            contents = await file.read()
+            file_size = len(contents)
+            
+            if file_size > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File {file.filename} exceeds the size limit of 15MB"
+                )
+            
+            # Reset file position for later processing
+            await file.seek(0)
+    
     collection_name = generate_collection_name(current_teacher.id, name)
     new_course = Course(
         name=name,
