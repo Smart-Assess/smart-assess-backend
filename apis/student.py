@@ -766,6 +766,9 @@ async def get_assignment_result(
         if total_score == 0 and any(q["plagiarism_score"] > 0.7 for q in detailed_questions):
             feedback = "Your total score is 0 because plagiarism was detected in your submission."
 
+        # Get report URL from MongoDB or SQL
+        report_url = evaluation_data.get("report_url", "")
+
         result_data = {
             "submission_id": submission.id,
             "submitted_at": submission.submitted_at.strftime("%Y-%m-%d %H:%M"),
@@ -776,6 +779,7 @@ async def get_assignment_result(
             "question_total_marks": question_total_marks,  # Add per-question marks
             "questions": sorted(detailed_questions, key=lambda x: x["question_number"]),
             "feedback": feedback,
+            "report_url": report_url,
             "scores": {
                 "plagiarism": overall_scores.get("plagiarism", {}).get("score", 0) if overall_scores else (evaluation.plagiarism_score if evaluation else None),
                 "ai_detection": overall_scores.get("ai_detection", {}).get("score", 0) if overall_scores else (evaluation.ai_detection_score if evaluation else None),
