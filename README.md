@@ -55,3 +55,25 @@ if Error than
 ```bash
 sudo docker-compose up
 ``` 
+
+
+SSH back into your server:
+```
+ssh root@134.209.110.162
+```
+Navigate to your application directory:
+```
+cd smart-assess-backend
+```
+Common management commands:
+
+Check logs: docker compose logs -f
+Restart services: docker compose restart
+Stop services: docker compose down
+Update to latest code:
+
+```
+git pull
+docker compose down
+docker compose up -d --build
+```
