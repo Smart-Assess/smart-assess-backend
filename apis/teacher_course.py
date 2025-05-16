@@ -53,7 +53,7 @@ def get_teacher_rag(collection_name: str) -> BestRAG:
     if collection_name not in teacher_rag_cache:
         teacher_rag_cache[collection_name] = BestRAG(
             url=os.getenv("QDRANT_URL"),
-            api_key=os.getenv("QDRANT_API_KEY"),
+            api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.11FasiHP2CCIpFT4rQ2dWpLLQBedlDAGjd2fuWYpDzM",
             collection_name=collection_name
         )
     return teacher_rag_cache[collection_name]
