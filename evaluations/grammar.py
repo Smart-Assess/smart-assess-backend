@@ -12,11 +12,11 @@ logger = logging.getLogger(__name__)
 class GrammarChecker:
     def __init__(self):
         # API URL for the grammar checking model
-        self.api_url = "https://api-inference.huggingface.co/models/samadpls/t5-base-grammar-checker"
+        self.api_url = os.getenv("GRAMMAR_API_URL", "https://x1gtgawsmeq79mpc.us-east-1.aws.endpoints.huggingface.cloud")
         
         # API tokens - having multiple allows for fallback
         self.api_tokens = [
-            os.getenv("HUGGINGFACE_TOKEN_2", "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")
+            os.getenv("GRAMMAR_API_TOKEN", "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")
         ]
         self.current_token_index = 0
         
@@ -32,7 +32,10 @@ class GrammarChecker:
     def _rotate_token(self):
         """Switch to the next API token"""
         self.current_token_index = (self.current_token_index + 1) % len(self.api_tokens)
-        self.headers = {"Authorization": f"Bearer {self.api_tokens[self.current_token_index]}"}
+        self.headers = {
+            	"Accept" : "application/json",
+                "Content-Type" : "application/json",                                                        
+            "Authorization": f"Bearer {self.api_tokens[self.current_token_index]}"}
         logger.info(f"Switched to API token {self.current_token_index + 1}")
     
     def query_api(self, text, attempt=0, delay=0):
@@ -48,10 +51,17 @@ class GrammarChecker:
             
         try:
             # Increase timeout from 2 to 5 seconds to avoid timeouts
+            payload = {
+                "inputs": text,
+                # "parameters": {
+                #     "max_length": 512,
+                #     "temperature": 0.7
+                # }
+            }
             response = requests.post(
                 self.api_url,
                 headers=self.headers,
-                json={"inputs": text},
+                json=payload,
                 timeout=5  # Increased timeout
             )
             
