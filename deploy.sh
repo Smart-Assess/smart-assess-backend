@@ -40,57 +40,6 @@ EOL
 echo "Please edit the .env file with your environment variables..."
 nano .env
 
-# Install Nginx and SSL tools
-echo "Installing Nginx and SSL tools..."
-apt update
-apt install -y nginx openssl
-
-# Create self-signed certificates
-echo "Creating self-signed SSL certificates..."
-mkdir -p /etc/nginx/ssl
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout /etc/nginx/ssl/nginx.key \
-  -out /etc/nginx/ssl/nginx.crt \
-  -subj "/CN=$(curl -s ifconfig.me)"
-
-# Configure Nginx as reverse proxy with SSL
-echo "Setting up Nginx reverse proxy with SSL..."
-cat > /etc/nginx/sites-available/smart-assess << 'EOL'
-server {
-    listen 443 ssl;
-    server_name _;
-    
-    ssl_certificate /etc/nginx/ssl/nginx.crt;
-    ssl_certificate_key /etc/nginx/ssl/nginx.key;
-    
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-
-server {
-    listen 80;
-    server_name _;
-    return 301 https://$host$request_uri;
-}
-EOL
-
-# Enable the Nginx site
-ln -s /etc/nginx/sites-available/smart-assess /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-
-# Update firewall rules
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw reload
-
-# Test and restart Nginx
-nginx -t && systemctl restart nginx
-
 # Configure firewall
 echo "Configuring firewall..."
 ufw allow 8000/tcp
@@ -108,11 +57,8 @@ docker ps
 echo ""
 echo "Deployment completed!"
 echo "Your API should now be accessible at:"
-echo "- Main API: https://$(curl -s ifconfig.me)"
-echo "- API Documentation: https://$(curl -s ifconfig.me)/docs"
-echo ""
-echo "NOTE: Since this is using a self-signed certificate, browsers will show a security warning."
-echo "You'll need to add a security exception or use the API with tools that can bypass certificate validation."
+echo "- Main API: http://$(curl -s ifconfig.me):8000"
+echo "- API Documentation: http://$(curl -s ifconfig.me):8000/docs"
 echo ""
 echo "To view logs: docker compose logs -f"
 echo "To restart services: docker compose restart"
