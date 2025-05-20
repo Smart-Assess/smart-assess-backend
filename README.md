@@ -77,3 +77,23 @@ git pull
 docker compose down
 docker compose up -d --build
 ```
+
+
+extra
+# On your Digital Ocean server, stash your local .env changes
+git stash
+
+# Pull the latest code
+git pull
+
+# Reapply your environment variables
+git stash pop
+# Check your current .env file
+cat .env
+
+# Edit the .env file
+nano .env
+
+# Make sure your QDRANT_API_KEY is correct
+# Replace with your valid API key
+QDRANT_API_KEY=your_valid_api_key_here
