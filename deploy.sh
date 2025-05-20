@@ -40,8 +40,88 @@ EOL
 echo "Please edit the .env file with your environment variables..."
 nano .env
 
+# Install Nginx and OpenSSL
+echo "Installing Nginx and OpenSSL..."
+apt update
+apt install -y nginx openssl
+
+# Create a simple self-signed certificate
+echo "Creating self-signed SSL certificate..."
+SERVER_IP=$(curl -s ifconfig.me)
+
+# Create directory for certificates
+mkdir -p /etc/nginx/ssl
+
+# Generate a self-signed certificate
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/nginx/ssl/nginx.key \
+  -out /etc/nginx/ssl/nginx.crt \
+  -subj "/CN=${SERVER_IP}" \
+  -addext "subjectAltName = IP:${SERVER_IP}"
+
+# Create Nginx configuration file
+echo "Setting up Nginx configuration..."
+cat > /etc/nginx/sites-available/smart-assess << EOL
+server {
+    listen 443 ssl;
+    
+    ssl_certificate /etc/nginx/ssl/nginx.crt;
+    ssl_certificate_key /etc/nginx/ssl/nginx.key;
+    
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    
+    # CORS headers
+    add_header 'Access-Control-Allow-Origin' '*';
+    add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS';
+    add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization';
+    
+    location / {
+        # Handle OPTIONS method for CORS preflight requests
+        if (\$request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+        
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+
+server {
+    listen 80;
+    return 301 https://\$host\$request_uri;
+}
+EOL
+
+# Enable the Nginx site
+ln -s /etc/nginx/sites-available/smart-assess /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default  # Remove default site
+
+# Test Nginx configuration
+nginx -t
+
+# If configuration test is successful, restart Nginx
+if [ $? -eq 0 ]; then
+    systemctl restart nginx
+    echo "Nginx configured successfully with SSL."
+else
+    echo "Nginx configuration failed. Check the error message above."
+    exit 1
+fi
+
 # Configure firewall
 echo "Configuring firewall..."
+ufw allow 80/tcp
+ufw allow 443/tcp
 ufw allow 8000/tcp
 ufw allow 5000/tcp
 ufw reload
@@ -57,8 +137,11 @@ docker ps
 echo ""
 echo "Deployment completed!"
 echo "Your API should now be accessible at:"
-echo "- Main API: http://$(curl -s ifconfig.me):8000"
-echo "- API Documentation: http://$(curl -s ifconfig.me):8000/docs"
+echo "- Main API: https://${SERVER_IP}"
+echo "- API Documentation: https://${SERVER_IP}/docs"
+echo ""
+echo "NOTE: Since this is using a self-signed certificate, browsers will show a security warning."
+echo "You'll need to accept the certificate warning in your browser before using the API."
 echo ""
 echo "To view logs: docker compose logs -f"
 echo "To restart services: docker compose restart"
