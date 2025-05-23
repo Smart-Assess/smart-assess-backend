@@ -38,7 +38,7 @@ class AIDetector:
         if not self.service_available:
             logger.warning("AI detection service score.")
 
-    def _wait_for_service(self, max_retries=3, retry_interval=2):
+    def _wait_for_service(self, max_retries=1, retry_interval=2):
         """Wait for AI detection service to be ready"""
         for i in range(max_retries):
             try:
