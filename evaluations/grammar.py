@@ -24,7 +24,7 @@ class GrammarChecker:
         self.headers = {"Authorization": f"Bearer {self.api_tokens[0]}"}
         
         # Maximum attempts to try different tokens
-        self.max_retries = 3
+        self.max_retries = 1
         
         # Flag to track if service is working
         self.service_available = True
