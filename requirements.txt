@@ -12,6 +12,7 @@ pydantic==2.10.4
 pymongo==4.10.1
 python-dotenv==1.0.1
 python_jose==3.3.0
+python-multipart==0.0.6
 Requests==2.32.3
 scikit_learn==1.6.0
 scipy==1.15.0
