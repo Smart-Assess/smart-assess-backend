@@ -17,10 +17,9 @@ class AIDetector:
         self.assignment_id = assignment_id
 
         # Configure service URLs
-        self.ai_service_host = os.getenv("AI_DETECTION_HOST", "localhost")
-        self.ai_service_port = os.getenv("AI_DETECTION_PORT", "5000")
-        self.ai_service_url = f"http://{self.ai_service_host}:{self.ai_service_port}/detect"
-        self.health_url = f"http://{self.ai_service_host}:{self.ai_service_port}/health"
+        self.ai_service_host = "https://ai-detection-47kng.ondigitalocean.app"
+        self.ai_service_url = f"{self.ai_service_host}/detect"
+        self.health_url = f"{self.ai_service_host}/health"
         
         # Flag to track if service is available
         self.service_available = False
