@@ -17,45 +17,43 @@ class AssignmentScoreCalculator:
         # Thresholds for zeroing out scores
         self.plagiarism_threshold = 0.9  # If plagiarism score is above 90%, zero the score
         self.ai_threshold = 0.9  # If AI score is above 90%, zero the score
-
+    
     def calculate_question_score(self, context_score, plagiarism_score=None, ai_score=None, grammar_score=None):
-        # If context score is zero, it's either an empty answer or completely irrelevant
-        if context_score == 0:
+        """Calculate question score based on individual components"""
+        try:
+            # Ensure all scores are floats, not dicts
+            context = float(context_score) if context_score is not None else 0.0
+            plagiarism = float(plagiarism_score) if plagiarism_score is not None else 0.0
+            ai = float(ai_score) if ai_score is not None else 0.0
+            grammar = float(grammar_score) if grammar_score is not None else 0.0
+            
+            # Calculate score per question
+            score_per_question = self.total_grade / self.num_questions
+            
+            # Start with context score as base
+            base_score = context * score_per_question
+            
+            # Apply penalties for high plagiarism/AI scores
+            if plagiarism > self.plagiarism_threshold or ai > self.ai_threshold:
+                return 0.0  # Zero score for high plagiarism/AI
+            
+            # Apply graduated penalties
+            plagiarism_penalty = min(plagiarism * self.plagiarism_penalty, self.max_penalty)
+            ai_penalty = min(ai * self.ai_detection_penalty, self.max_penalty)
+            grammar_penalty = min((1.0 - grammar) * self.grammar_penalty, self.max_penalty)
+            
+            # Total penalty cannot exceed max_penalty
+            total_penalty = min(plagiarism_penalty + ai_penalty + grammar_penalty, self.max_penalty)
+            
+            # Apply penalty to base score
+            final_score = base_score * (1.0 - total_penalty)
+            
+            return max(0.0, round(final_score, 4))
+            
+        except (TypeError, ValueError) as e:
+            print(f"Error calculating question score: {e}")
+            print(f"Scores: context={context_score}, plagiarism={plagiarism_score}, ai={ai_score}, grammar={grammar_score}")
             return 0.0
-        
-        # Zero out the score if plagiarism or AI detection is above threshold
-        if plagiarism_score is not None and plagiarism_score >= self.plagiarism_threshold:
-            print(f"Zeroing score due to high plagiarism: {plagiarism_score}")
-            return 0.0
-            
-        if ai_score is not None and ai_score >= self.ai_threshold:
-            print(f"Zeroing score due to high AI detection: {ai_score}")
-            return 0.0
-        
-        # Otherwise continue with normal penalty calculation
-        base_score = context_score 
-        total_penalty = 0
-        
-        # Calculate penalties from plagiarism, AI, grammar scores
-        if plagiarism_score is not None:
-            plagiarism_penalty = plagiarism_score * self.plagiarism_penalty
-            total_penalty += plagiarism_penalty
-            
-        if ai_score is not None:
-            ai_penalty = ai_score * self.ai_detection_penalty
-            total_penalty += ai_penalty
-            
-        if grammar_score is not None:
-            grammar_penalty = (1 - grammar_score) * self.grammar_penalty
-            total_penalty += grammar_penalty
-            
-        total_penalty = min(total_penalty, self.max_penalty)
-        
-        # Calculate final score for question
-        adjusted_score = base_score * (1 - total_penalty)
-        
-        return adjusted_score
-
     def calculate_submission_evaluation(
         self,
         question_results: Dict[str, Dict[str, float]]
