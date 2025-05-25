@@ -611,8 +611,9 @@ async def evaluate_submissions(
             pdf_files = [teacher_pdf_path] + list(submission_paths.values())
 
             request_dict = request.dict()
-            request_dict["grammar_delay"] = 0.5
-            request_dict["ai_detection_delay"] = 1.0
+            request_dict["grammar_delay"] = 0.2  # Reduced from 0.5
+            request_dict["ai_detection_delay"] = 0.5  # Reduced from 1.0
+            request_dict["feedback_delay"] = 0.3  # Add this for feedback generation
             modified_request = EvaluationRequest(**request_dict)
             
             # Initialize AssignmentEvaluator with modified request
@@ -626,7 +627,7 @@ async def evaluate_submissions(
             
             # Print evaluation configuration for debugging
             print(f"Evaluation configuration: AI detection: {request.enable_ai_detection}, Grammar: {request.enable_grammar}, Plagiarism: {request.enable_plagiarism}")
-            print(f"Rate limiting: Grammar delay: 0.5s, AI detection delay: 1.0s")
+            print(f"Rate limiting: Grammar delay: 0.2s, AI detection delay: 0.5s, Feedback delay: 0.3s")
             
             db_mongo.evaluation_results.delete_many({
                 "course_id": course_id,

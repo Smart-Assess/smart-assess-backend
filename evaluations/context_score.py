@@ -59,25 +59,38 @@ class ContextScorer:
         
         reference = self.clean_and_tokenize_text(rag_results)
         
-        # Calculate BLEURT score
-        bleurt = float(np.round(
-            self.scorer.score(
+        try:
+            # Calculate BLEURT score with proper error handling
+            bleurt_result = self.scorer.score(
                 references=[f"QUESTION: {question}\n\n{reference}"],
                 candidates=[answer]
-            ),
-            4
-        ))
+            )
+            
+            # Handle both single float and list returns from BLEURT
+            if isinstance(bleurt_result, (list, np.ndarray)):
+                bleurt = float(np.round(bleurt_result[0], 4))
+            else:
+                bleurt = float(np.round(bleurt_result, 4))
+                
+        except Exception as e:
+            print(f"BLEURT scoring error: {e}")
+            bleurt = 0.0
         
-        # Calculate similarity scores
-        similarity = float(np.round(
-            self.text_similarity.compute_cosine_similarity(reference, answer),
-            4
-        ))
-        
-        relevance = float(np.round(
-            self.text_similarity.compute_cosine_similarity(question, answer),
-            4
-        ))
+        try:
+            # Calculate similarity scores
+            similarity = float(np.round(
+                self.text_similarity.compute_cosine_similarity(reference, answer),
+                4
+            ))
+            
+            relevance = float(np.round(
+                self.text_similarity.compute_cosine_similarity(question, answer),
+                4
+            ))
+        except Exception as e:
+            print(f"Similarity calculation error: {e}")
+            similarity = 0.0
+            relevance = 0.0
         
         # Calculate weighted score
         combined_score = (
@@ -95,21 +108,73 @@ class ContextScorer:
         question_scores = []
         total_context_score = 0
         
+        # Process each question individually to avoid BLEURT batch issues
         for q_num in range(1, num_questions + 1):
             q_key = f"Question#{q_num}"
             a_key = f"Answer#{q_num}"
             
             if q_key in teacher_questions:
                 question = teacher_questions[q_key]
-                answer = qa_pairs.get(a_key, "")  # Default to empty string if missing
+                answer = qa_pairs.get(a_key, "")
                 
-                # Always process the question, even with empty answer
                 if not answer or len(answer.strip()) < 5:
-                    print(f"Question {q_num}: Empty or very short answer - assigning zero score")
-                    score = 0.0
-                else:
-                    score = self.calculate_score(question, answer, score_per_question)
+                    # Handle empty answers immediately
+                    question_scores.append({
+                        "question_key": q_key,
+                        "context_score": 0.0
+                    })
+                    continue
+                
+                # Get reference from RAG
+                rag_results = self.rag.search(question)
+                if not rag_results:
+                    question_scores.append({
+                        "question_key": q_key,
+                        "context_score": 0.0
+                    })
+                    continue
+                
+                reference = self.clean_and_tokenize_text(rag_results)
+                
+                # Calculate BLEURT score - single item at a time
+                try:
+                    bleurt_result = self.scorer.score(
+                        references=[f"QUESTION: {question}\n\n{reference}"],
+                        candidates=[answer]
+                    )
                     
+                    # Handle both single float and list returns from BLEURT
+                    if isinstance(bleurt_result, (list, np.ndarray)):
+                        bleurt = float(np.round(bleurt_result[0], 4))
+                    else:
+                        bleurt = float(np.round(bleurt_result, 4))
+                        
+                except Exception as e:
+                    print(f"BLEURT scoring error for question {q_num}: {e}")
+                    bleurt = 0.0
+                
+                # Calculate similarity scores
+                try:
+                    similarity = float(np.round(
+                        self.text_similarity.compute_cosine_similarity(reference, answer), 4
+                    ))
+                    
+                    relevance = float(np.round(
+                        self.text_similarity.compute_cosine_similarity(question, answer), 4
+                    ))
+                except Exception as e:
+                    print(f"Similarity calculation error for question {q_num}: {e}")
+                    similarity = 0.0
+                    relevance = 0.0
+                
+                # Calculate weighted score
+                combined_score = (
+                    bleurt * self.BLEURT_WEIGHT + 
+                    similarity * self.SIMILARITY_WEIGHT + 
+                    relevance * self.RELEVANCE_WEIGHT
+                )
+                
+                score = round(combined_score * score_per_question, 4)
                 total_context_score += score
                 
                 question_scores.append({
@@ -123,9 +188,9 @@ class ContextScorer:
         }
 
     def save_results_to_mongo(self, submission_id: str, results: dict):
-        """Update evaluation document with context scores"""
+        """Update evaluation document with context scores using bulk operations"""
         
-        # First ensure document exists with questions array
+        # First ensure document exists with questions array - single operation
         self.results_collection.update_one(
             {
                 "course_id": self.course_id,
@@ -133,6 +198,12 @@ class ContextScorer:
                 "submission_id": submission_id
             },
             {
+                "$set": {
+                    "overall_scores.context": {
+                        "score": round(results["context_overall_score"], 4),
+                        "evaluated_at": datetime.now(timezone.utc)
+                    }
+                },
                 "$setOnInsert": {
                     "questions": [
                         {
@@ -144,37 +215,34 @@ class ContextScorer:
             },
             upsert=True
         )
-    
-        # Then update scores for each question
-        updates = []
-        for question in results["questions"]:
-            q_num = int(question["question_key"].split('#')[1])
-            updates.append(
-                UpdateOne(
-                    {
-                        "course_id": self.course_id,
-                        "assignment_id": self.assignment_id,
-                        "submission_id": submission_id,
-                        "questions.question_number": q_num
-                    },
-                    {
-                        "$set": {
-                            "questions.$.scores.context": {
-                                "score": round(question["context_score"], 4),
-                                "evaluated_at": datetime.now(timezone.utc)
-                            },
-                            "overall_scores.context": {
-                                "score": round(results["context_overall_score"], 4),
-                                "evaluated_at": datetime.now(timezone.utc)
+
+        # Bulk update all questions in one operation
+        if results["questions"]:
+            updates = []
+            for question in results["questions"]:
+                q_num = int(question["question_key"].split('#')[1])
+                updates.append(
+                    UpdateOne(
+                        {
+                            "course_id": self.course_id,
+                            "assignment_id": self.assignment_id,
+                            "submission_id": submission_id,
+                            "questions.question_number": q_num
+                        },
+                        {
+                            "$set": {
+                                "questions.$.scores.context": {
+                                    "score": round(question["context_score"], 4),
+                                    "evaluated_at": datetime.now(timezone.utc)
+                                }
                             }
                         }
-                    }
+                    )
                 )
-            )
-    
-        # Execute updates
-        if updates:
-            self.results_collection.bulk_write(updates)
+            
+            # Execute all updates at once
+            if updates:
+                self.results_collection.bulk_write(updates)
 
     def run(self, teacher_questions, questions_answers_by_submission, submission_ids, total_score: float = 100.0) -> dict:
         final_results = {
@@ -185,24 +253,40 @@ class ContextScorer:
 
         for submission_id, qa_pairs in questions_answers_by_submission.items():
             print("submission_id>>>", submission_id)
-            # Process submission
-            results = self.process_submission(teacher_questions, qa_pairs, total_score=total_score)
             
-            # Save to MongoDB
-            self.save_results_to_mongo(submission_id, results)
-            
-            # Add to final results
-            submission_result = {
-                "submission_id": submission_id,
-                "question_results": {
-                    score["question_key"]: {"context_score": score["context_score"]}
-                    for score in results["questions"]
-                },
-                "context_overall_score": results["context_overall_score"],
-                "evaluated_at": datetime.now(timezone.utc)
-            }
-            
-            final_results["results"].append(submission_result)
+            try:
+                # Process submission with error handling
+                results = self.process_submission(teacher_questions, qa_pairs, total_score=total_score)
+                
+                # Save to MongoDB
+                self.save_results_to_mongo(submission_id, results)
+                
+                # Add to final results
+                submission_result = {
+                    "submission_id": submission_id,
+                    "question_results": {
+                        score["question_key"]: {"context_score": score["context_score"]}
+                        for score in results["questions"]
+                    },
+                    "context_overall_score": results["context_overall_score"],
+                    "evaluated_at": datetime.now(timezone.utc)
+                }
+                
+                final_results["results"].append(submission_result)
+                
+            except Exception as e:
+                print(f"Error processing submission {submission_id}: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                # Add a default result for this submission
+                final_results["results"].append({
+                    "submission_id": submission_id,
+                    "question_results": {},
+                    "context_overall_score": 0.0,
+                    "evaluated_at": datetime.now(timezone.utc),
+                    "error": str(e)
+                })
 
         return final_results
 
