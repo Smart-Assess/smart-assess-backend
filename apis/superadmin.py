@@ -154,6 +154,7 @@ async def get_university(
             "id": university_admin.id,
             "name": university_admin.name,
             "email": university_admin.email,
+            "password": university_admin.password,
             "university_id": university_admin.university_id,
             "created_at": university_admin.created_at,
         }
