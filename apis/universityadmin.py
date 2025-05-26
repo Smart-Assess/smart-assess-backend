@@ -181,6 +181,7 @@ async def get_student(
             "image_url": student.image_url,
             "created_at": student.created_at,
             "university_id": student.university_id,
+            "password": student.password,
         },
     }
 
@@ -413,6 +414,7 @@ async def get_teacher(
             "image_url": teacher.image_url,
             "created_at": teacher.created_at,
             "university_id": teacher.university_id,
+            "password": teacher.password,
         },
     }
 
