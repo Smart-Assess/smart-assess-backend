@@ -24,6 +24,7 @@ from bson import ObjectId
 import json
 from fastapi import APIRouter, UploadFile, Form, File, HTTPException, Depends
 from utils.converter import convert_ppt_to_pdf
+from utils.security import get_password_hash
 
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
@@ -606,4 +607,143 @@ async def get_course_requests(
         "status": 200,
         "course_id": course_id,
         "requests": requests_data
+    }
+
+@router.put("/teacher/profile", response_model=dict)
+async def update_teacher_profile(
+    full_name: Optional[str] = Form(None),
+    email: Optional[str] = Form(None),
+    password: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin),
+):
+    """
+    Update teacher's own profile.
+    Teachers can update their name, email, password, and profile image.
+    """
+    teacher = db.query(Teacher).filter(Teacher.id == current_teacher.id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    # Update email if provided and not already taken
+    if email:
+        existing_teacher = (
+            db.query(Teacher)
+            .filter(Teacher.email == email, Teacher.id != current_teacher.id)
+            .first()
+        )
+        if existing_teacher:
+            raise HTTPException(
+                status_code=400, detail="Email already taken by another teacher"
+            )
+        teacher.email = email
+
+    # Update full name if provided
+    if full_name:
+        teacher.full_name = full_name.strip()
+
+    # Update password if provided
+    if password:
+        teacher.password = get_password_hash(password)
+
+    # Handle image upload if provided
+    if image:
+        try:
+            # Validate file type
+            allowed_extensions = ['jpg', 'jpeg', 'png', 'gif']
+            file_extension = image.filename.split('.')[-1].lower()
+            if file_extension not in allowed_extensions:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only JPG, JPEG, PNG, and GIF files are allowed"
+                )
+
+            # Delete the old image if it exists
+            if teacher.image_url:
+                delete_success = delete_from_s3(teacher.image_url)
+                if not delete_success:
+                    print(f"Failed to delete old image: {teacher.image_url}")
+
+            # Save the new image to a temporary file
+            temp_dir = "temp"
+            os.makedirs(temp_dir, exist_ok=True)
+            image_path = os.path.join(temp_dir, image.filename)
+            
+            with open(image_path, "wb") as buffer:
+                buffer.write(await image.read())
+
+            # Upload the new image to S3
+            image_url = upload_to_s3(
+                folder_name="teacher_images",
+                file_name=f"{teacher.teacher_id}_{image.filename}",
+                file_path=image_path,
+            )
+            
+            if not image_url:
+                raise HTTPException(
+                    status_code=500, detail="Failed to upload teacher image"
+                )
+
+            # Clean up the temporary file
+            os.remove(image_path)
+
+            # Update the teacher's image URL
+            teacher.image_url = image_url
+            
+        except Exception as e:
+            print(f"Error handling image upload: {e}")
+            raise HTTPException(
+                status_code=500, detail="An error occurred while processing the image"
+            )
+
+    # Commit changes
+    try:
+        db.commit()
+        db.refresh(teacher)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update profile: {str(e)}"
+        )
+
+    return {
+        "success": True,
+        "status": 200,
+        "message": "Profile updated successfully",
+        "teacher": {
+            "id": teacher.id,
+            "full_name": teacher.full_name,
+            "teacher_id": teacher.teacher_id,
+            "department": teacher.department,
+            "email": teacher.email,
+            "image_url": teacher.image_url,
+            "created_at": teacher.created_at,
+            "university_id": teacher.university_id,
+        },
+    }
+
+@router.get("/teacher/profile", response_model=dict)
+async def get_teacher_profile(
+    db: Session = Depends(get_db),
+    current_teacher: Teacher = Depends(get_current_admin),
+):
+    """Get teacher's own profile information."""
+    teacher = db.query(Teacher).filter(Teacher.id == current_teacher.id).first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    return {
+        "success": True,
+        "status": 200,
+        "teacher": {
+            "id": teacher.id,
+            "full_name": teacher.full_name,
+            "teacher_id": teacher.teacher_id,
+            "department": teacher.department,
+            "email": teacher.email,
+            "image_url": teacher.image_url,
+            "created_at": teacher.created_at,
+            "university_id": teacher.university_id,
+        },
     }
