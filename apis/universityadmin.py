@@ -286,13 +286,13 @@ async def update_student(
             )
             if not image_url:
                 raise HTTPException(
-                    status_code=500, detail="Failed to upload university image"
+                    status_code=500, detail="Failed to upload student image"
                 )
 
             # Clean up the temporary file
             os.remove(image_path)
 
-            # Update the university's image URL
+            # Update the student's image URL
             student.image_url = image_url
         except Exception as e:
             print(f"Error handling image upload: {e}")
@@ -301,7 +301,9 @@ async def update_student(
             )
 
     db.commit()
-    send_email(student.email,"",student.password,"student")
+    # Only send email if password was updated
+    if password:
+        send_email(student.email, "", password, "student")
     db.refresh(student)
 
     return {
@@ -510,13 +512,13 @@ async def update_teacher(
             )
             if not image_url:
                 raise HTTPException(
-                    status_code=500, detail="Failed to upload university image"
+                    status_code=500, detail="Failed to upload teacher image"
                 )
 
             # Clean up the temporary file
             os.remove(image_path)
 
-            # Update the university's image URL
+            # Update the teacher's image URL
             teacher.image_url = image_url
         except Exception as e:
             print(f"Error handling image upload: {e}")
@@ -525,7 +527,9 @@ async def update_teacher(
             )
 
     db.commit()
-    send_email(teacher.email,"",teacher.password,"teacher")
+    # Only send email if password was updated
+    if password:
+        send_email(teacher.email, "", password, "teacher")
     db.refresh(teacher)
 
     return {
