@@ -212,7 +212,8 @@ class PDFReportGenerator:
                         self.pdf.set_text_color(*self.danger_color)
                     
                     self.pdf.cell(50, 6, name, 1, 0)
-                    self.pdf.cell(30, 6, f"{score:.2f}", 1, 1, 'C')
+                    # Convert score to percentage
+                    self.pdf.cell(30, 6, f"{score * 100:.1f}%", 1, 1, 'C')
                     
                 # Reset text color
                 self.pdf.set_text_color(*self.text_color)
