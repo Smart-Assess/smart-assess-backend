@@ -29,6 +29,38 @@ class PDFReportGenerator:
         self.warning_color = (255, 152, 0)  # Orange
         self.danger_color = (244, 67, 54)  # Red
     
+    def clean_text_for_pdf(self, text: str) -> str:
+        """Clean text to remove problematic Unicode characters for PDF generation"""
+        if not text:
+            return ""
+        
+        # Replace common Unicode characters that cause Latin-1 encoding errors
+        replacements = {
+            '\u2022': '* ',     # Bullet point •
+            '\u2013': '-',      # En dash –
+            '\u2014': '--',     # Em dash —
+            '\u2018': "'",      # Left single quote '
+            '\u2019': "'",      # Right single quote '
+            '\u201c': '"',      # Left double quote "
+            '\u201d': '"',      # Right double quote "
+            '\u2026': '...',    # Ellipsis …
+            '\u00a0': ' ',      # Non-breaking space
+            '\u00b7': '* ',     # Middle dot ·
+            '\u25cf': '* ',     # Black circle ●
+            '\u25cb': 'o ',     # White circle ○
+            '\u25a0': '■ ',     # Black square ■
+            '\u25a1': '□ ',     # White square □
+        }
+        
+        # Apply replacements
+        for unicode_char, replacement in replacements.items():
+            text = text.replace(unicode_char, replacement)
+        
+        # Remove any remaining non-ASCII characters
+        text = text.encode('ascii', 'ignore').decode('ascii')
+        
+        return text
+    
     def generate_report_from_mongodb(self, mongo_data: Dict[str, Any], total_possible: float, 
                                      student_name: str, course_name: str, assignment_name: str):
         """Generate report page with data from MongoDB evaluation results"""
@@ -204,6 +236,7 @@ class PDFReportGenerator:
                     feedback_content = feedback_data
                     
                 if feedback_content:
+                    feedback_content = self.clean_text_for_pdf(feedback_content)  # Clean feedback content
                     self.pdf.ln(2)
                     self.pdf.set_font("Arial", 'B', 10)
                     self.pdf.set_text_color(*self.secondary_color)
@@ -224,6 +257,7 @@ class PDFReportGenerator:
             feedback_content = overall_feedback
             
         if feedback_content:
+            feedback_content = self.clean_text_for_pdf(feedback_content)  # Clean overall feedback content
             # Add a new page if we're more than 75% down the page
             if self.pdf.get_y() > 220:
                 self.pdf.add_page()
@@ -302,30 +336,44 @@ class PDFReportGenerator:
     ) -> Optional[str]:
         """
         Download student PDF, append report, and upload back to S3
-        
-        Args:
-            mongo_data: MongoDB evaluation result document
-            student_pdf_url: URL of the student PDF in S3
-            total_possible: Maximum possible points
-            student_name: Student's name
-            course_name: Course name
-            assignment_name: Assignment name
-            folder_name: S3 folder name for report
-            output_filename: Filename for output PDF
-            
-        Returns:
-            Optional[str]: URL of the uploaded PDF with report or None if failed
         """
+        import tempfile
+        import os
+        
+        # Clean text inputs that go into PDF to prevent encoding errors
+        student_name = self.clean_text_for_pdf(student_name)
+        course_name = self.clean_text_for_pdf(course_name)
+        assignment_name = self.clean_text_for_pdf(assignment_name)
+        
+        # Clean MongoDB feedback data
+        if "overall_feedback" in mongo_data:
+            if isinstance(mongo_data["overall_feedback"], dict):
+                if "content" in mongo_data["overall_feedback"]:
+                    mongo_data["overall_feedback"]["content"] = self.clean_text_for_pdf(
+                        mongo_data["overall_feedback"]["content"]
+                    )
+            elif isinstance(mongo_data["overall_feedback"], str):
+                mongo_data["overall_feedback"] = self.clean_text_for_pdf(mongo_data["overall_feedback"])
+        
+        # Clean question feedback
+        if "questions" in mongo_data:
+            for question in mongo_data["questions"]:
+                if "feedback" in question:
+                    if isinstance(question["feedback"], dict) and "content" in question["feedback"]:
+                        question["feedback"]["content"] = self.clean_text_for_pdf(question["feedback"]["content"])
+                    elif isinstance(question["feedback"], str):
+                        question["feedback"] = self.clean_text_for_pdf(question["feedback"])
+        
         temp_student_pdf = tempfile.mktemp(suffix='.pdf')
         temp_output_pdf = tempfile.mktemp(suffix='.pdf')
         
         try:
-            # Download student PDF
+            # Download the student PDF from S3
             if not download_from_s3(student_pdf_url, temp_student_pdf):
-                print(f"Failed to download student PDF from {student_pdf_url}")
+                print(f"Failed to download student PDF from: {student_pdf_url}")
                 return None
             
-            # Generate report from MongoDB data
+            # Generate the report page
             self.generate_report_from_mongodb(
                 mongo_data=mongo_data,
                 total_possible=total_possible,
@@ -339,17 +387,31 @@ class PDFReportGenerator:
                 print("Failed to append report to student PDF")
                 return None
             
-            # Upload combined PDF to S3
-            s3_url = upload_to_s3(
+            # Upload the combined PDF to S3
+            report_url = upload_to_s3(
                 folder_name=folder_name,
                 file_name=output_filename,
                 file_path=temp_output_pdf
             )
             
-            return s3_url
+            if report_url:
+                print(f"Successfully uploaded report to: {report_url}")
+                return report_url
+            else:
+                print("Failed to upload report to S3")
+                return None
+                
+        except Exception as e:
+            print(f"Error processing submission with report: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
             
         finally:
             # Clean up temporary files
             for temp_file in [temp_student_pdf, temp_output_pdf]:
-                if os.path.exists(temp_file):
-                    os.unlink(temp_file)
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except Exception as e:
+                    print(f"Failed to cleanup temp file {temp_file}: {e}")
