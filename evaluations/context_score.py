@@ -13,9 +13,19 @@ from utils.bleurt.bleurt import score as bleurt_score
 from utils.mongodb import mongo_db
 
 class TextSimilarity:
+    _instance = None
+    _model = None
+    
+    def __new__(cls, model_name='BAAI/bge-small-en-v1.5'):
+        if cls._instance is None:
+            cls._instance = super(TextSimilarity, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self, model_name='BAAI/bge-small-en-v1.5'):
-        print("Loading Text Embedding Model...")
-        self.dense_model = TextEmbedding(model_name)
+        if TextSimilarity._model is None:
+            print("Loading Text Embedding Model (one time only)...")
+            TextSimilarity._model = TextEmbedding(model_name)
+        self.dense_model = TextSimilarity._model
 
     def get_text_embedding(self, text):
         embedding = np.array(list(self.dense_model.embed([text]))[0])
@@ -28,14 +38,24 @@ class TextSimilarity:
         return similarity[0][0]
 
 class ContextScorer:
+    _bleurt_scorer = None
+    _text_similarity = None
+    
     def __init__(self, course_id: int, assignment_id: int, rag):
         self.course_id = course_id
         self.assignment_id = assignment_id
         self.rag = rag
         
-        # Initialize components
-        self.text_similarity = TextSimilarity()
-        self.scorer = bleurt_score.BleurtScorer()
+        # Initialize components with class-level caching
+        if ContextScorer._text_similarity is None:
+            print("Initializing TextSimilarity (cached for all future evaluations)...")
+            ContextScorer._text_similarity = TextSimilarity()
+        self.text_similarity = ContextScorer._text_similarity
+        
+        if ContextScorer._bleurt_scorer is None:
+            print("Loading BLEURT scorer (cached for all future evaluations)...")
+            ContextScorer._bleurt_scorer = bleurt_score.BleurtScorer()
+        self.scorer = ContextScorer._bleurt_scorer
         
         # MongoDB setup
         self.db = mongo_db.db
