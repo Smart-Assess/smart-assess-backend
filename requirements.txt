@@ -27,3 +27,7 @@ pytest
 fpdf
 matplotlib
 psycopg2-binary==2.9.9
+
+# Performance optimizations
+uvloop>=0.17.0
+psutil>=5.9.0
