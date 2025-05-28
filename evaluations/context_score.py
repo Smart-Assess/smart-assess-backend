@@ -60,13 +60,12 @@ class ContextScorer:
         reference = self.clean_and_tokenize_text(rag_results)
         
         try:
-            # Calculate BLEURT score with proper error handling
+            # Calculate BLEURT score
             bleurt_result = self.scorer.score(
                 references=[f"QUESTION: {question}\n\n{reference}"],
                 candidates=[answer]
             )
             
-            # Handle both single float and list returns from BLEURT
             if isinstance(bleurt_result, (list, np.ndarray)):
                 bleurt = float(np.round(bleurt_result[0], 4))
             else:
@@ -79,36 +78,34 @@ class ContextScorer:
         try:
             # Calculate similarity scores
             similarity = float(np.round(
-                self.text_similarity.compute_cosine_similarity(reference, answer),
-                4
+                self.text_similarity.compute_cosine_similarity(reference, answer), 4
             ))
             
             relevance = float(np.round(
-                self.text_similarity.compute_cosine_similarity(question, answer),
-                4
+                self.text_similarity.compute_cosine_similarity(question, answer), 4
             ))
         except Exception as e:
             print(f"Similarity calculation error: {e}")
             similarity = 0.0
             relevance = 0.0
         
-        # Calculate weighted score
+        # Calculate weighted score and KEEP IT NORMALIZED (0-1)
         combined_score = (
             bleurt * self.BLEURT_WEIGHT + 
             similarity * self.SIMILARITY_WEIGHT + 
             relevance * self.RELEVANCE_WEIGHT
         )
         
-        return round(combined_score * total_score_per_question, 4)
+        # Return normalized score (0-1), NOT multiplied by total_score_per_question
+        return round(max(0.0, min(1.0, combined_score)), 4)
 
     def process_submission(self, teacher_questions: dict, qa_pairs: dict, total_score: float = 100.0) -> dict:
         num_questions = len([k for k in teacher_questions if k.startswith("Question#")])
-        score_per_question = total_score / num_questions if num_questions > 0 else 0
         
         question_scores = []
-        total_context_score = 0
+        total_normalized_score = 0
         
-        # Process each question individually to avoid BLEURT batch issues
+        # Process each question individually
         for q_num in range(1, num_questions + 1):
             q_key = f"Question#{q_num}"
             a_key = f"Answer#{q_num}"
@@ -118,10 +115,9 @@ class ContextScorer:
                 answer = qa_pairs.get(a_key, "")
                 
                 if not answer or len(answer.strip()) < 5:
-                    # Handle empty answers immediately
                     question_scores.append({
                         "question_key": q_key,
-                        "context_score": 0.0
+                        "context_score": 0.0  # Normalized score (0-1)
                     })
                     continue
                 
@@ -130,20 +126,19 @@ class ContextScorer:
                 if not rag_results:
                     question_scores.append({
                         "question_key": q_key,
-                        "context_score": 0.0
+                        "context_score": 0.0  # Normalized score (0-1)
                     })
                     continue
                 
                 reference = self.clean_and_tokenize_text(rag_results)
                 
-                # Calculate BLEURT score - single item at a time
+                # Calculate BLEURT score
                 try:
                     bleurt_result = self.scorer.score(
                         references=[f"QUESTION: {question}\n\n{reference}"],
                         candidates=[answer]
                     )
                     
-                    # Handle both single float and list returns from BLEURT
                     if isinstance(bleurt_result, (list, np.ndarray)):
                         bleurt = float(np.round(bleurt_result[0], 4))
                     else:
@@ -167,24 +162,28 @@ class ContextScorer:
                     similarity = 0.0
                     relevance = 0.0
                 
-                # Calculate weighted score
+                # Calculate weighted score - KEEP NORMALIZED (0-1)
                 combined_score = (
                     bleurt * self.BLEURT_WEIGHT + 
                     similarity * self.SIMILARITY_WEIGHT + 
                     relevance * self.RELEVANCE_WEIGHT
                 )
                 
-                score = round(combined_score * score_per_question, 4)
-                total_context_score += score
+                # Store normalized score (0-1)
+                normalized_score = round(max(0.0, min(1.0, combined_score)), 4)
+                total_normalized_score += normalized_score
                 
                 question_scores.append({
                     "question_key": q_key,
-                    "context_score": score
+                    "context_score": normalized_score  # This is 0-1
                 })
+        
+        # Calculate average normalized score (0-1)
+        avg_normalized_score = total_normalized_score / num_questions if num_questions > 0 else 0.0
         
         return {
             "questions": question_scores,
-            "context_overall_score": round(total_context_score, 4)
+            "context_overall_score": round(avg_normalized_score, 4)  # This is 0-1
         }
 
     def save_results_to_mongo(self, submission_id: str, results: dict):
