@@ -675,34 +675,56 @@ async def evaluate_submissions(
                         feedback_content = feedback_data
                     
                     # Create PDF report with MongoDB data
-                    report_generator = PDFReportGenerator()
-                    
-                    # Generate filename for the report
-                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    report_filename = f"report_{student.student_id}_{timestamp}.pdf"
-                    
-                    # Process the submission - download, append report, upload
-                    report_url = report_generator.process_submission_with_report(
-                        mongo_data=submission_data,
-                        student_pdf_url=submission.submission_pdf_url,
-                        total_possible=assignment.grade,
-                        student_name=student.full_name,
-                        course_name=course.name,
-                        assignment_name=assignment.name,
-                        folder_name=f"assignment_reports/{course_id}/{assignment_id}",
-                        output_filename=report_filename
-                    )
-                    
-                    # Update MongoDB with the report URL
-                    if report_url:
-                        db_mongo.evaluation_results.update_one(
-                            {
+                    try:
+                        report_generator = PDFReportGenerator()
+                        
+                        # Generate filename for the report
+                        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                        safe_student_id = str(student.student_id).replace("/", "_")
+                        report_filename = f"report_{safe_student_id}_{timestamp}.pdf"
+                        
+                        print(f"Generating report for student {student.full_name} (ID: {student.student_id})")
+                        
+                        # Process the submission - download, append report, upload
+                        report_url = report_generator.process_submission_with_report(
+                            mongo_data=submission_data,
+                            student_pdf_url=submission.submission_pdf_url,
+                            total_possible=float(assignment.grade),
+                            student_name=student.full_name,
+                            course_name=course.name,
+                            assignment_name=assignment.name,
+                            folder_name=f"assignment_reports/{course_id}/{assignment_id}",
+                            output_filename=report_filename
+                        )
+                        
+                        print(f"Report generation result for submission {submission_id}: {report_url}")
+                        
+                        # Update MongoDB with the report URL
+                        if report_url:
+                            update_result = db_mongo.evaluation_results.update_one(
+                                {
+                                    "course_id": course_id,
+                                    "assignment_id": assignment_id,
+                                    "submission_id": submission_id
+                                },
+                                {"$set": {"report_url": report_url}}
+                            )
+                            print(f"MongoDB update result: {update_result.modified_count} documents modified")
+                            
+                            # Verify the update
+                            updated_doc = db_mongo.evaluation_results.find_one({
                                 "course_id": course_id,
                                 "assignment_id": assignment_id,
                                 "submission_id": submission_id
-                            },
-                            {"$set": {"report_url": report_url}}
-                        )
+                            })
+                            print(f"Verified report URL in MongoDB: {updated_doc.get('report_url', 'NOT FOUND')}")
+                        else:
+                            print(f"Failed to generate report for submission {submission_id}")
+                            
+                    except Exception as report_error:
+                        print(f"Error generating report for submission {submission_id}: {str(report_error)}")
+                        import traceback
+                        traceback.print_exc()
                     
                     # Create evaluation result with report URL
                     result = {
