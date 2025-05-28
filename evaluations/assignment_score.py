@@ -21,16 +21,19 @@ class AssignmentScoreCalculator:
     def calculate_question_score(self, context_score, plagiarism_score=None, ai_score=None, grammar_score=None):
         """Calculate question score based on individual components"""
         try:
-            # Ensure all scores are floats, not dicts
+            # Ensure all scores are normalized (0-1)
             context = float(context_score) if context_score is not None else 0.0
             plagiarism = float(plagiarism_score) if plagiarism_score is not None else 0.0
             ai = float(ai_score) if ai_score is not None else 0.0
             grammar = float(grammar_score) if grammar_score is not None else 0.0
             
-            # Calculate score per question
+            # Ensure context score is normalized (0-1)
+            context = max(0.0, min(1.0, context))
+            
+            # Calculate score per question (maximum points for each question)
             score_per_question = self.total_grade / self.num_questions
             
-            # Start with context score as base
+            # Start with context score as base (multiply normalized score by max points)
             base_score = context * score_per_question
             
             # Apply penalties for high plagiarism/AI scores
@@ -54,43 +57,38 @@ class AssignmentScoreCalculator:
             print(f"Error calculating question score: {e}")
             print(f"Scores: context={context_score}, plagiarism={plagiarism_score}, ai={ai_score}, grammar={grammar_score}")
             return 0.0
-    def calculate_submission_evaluation(
-        self,
-        question_results: Dict[str, Dict[str, float]]
-    ) -> Dict:
+
+    def calculate_submission_evaluation(self, question_results: Dict[str, Dict[str, float]]) -> Dict:
         """Calculate overall evaluation scores based on per-question results"""
-        # Initialize counters for different score types
+        # Initialize counters
         total_score = 0
         context_sum = 0
         plagiarism_sum = 0
         ai_sum = 0
         grammar_sum = 0
         
-        # Count questions - this should be the TOTAL number of questions
-        # not just the ones that were answered
-        question_count = self.num_questions  # Use the number from initialization
+        # Use the total number of questions from initialization
+        question_count = self.num_questions
         
         # Process each question's scores
         for question_key, scores in question_results.items():
-            # Get individual scores with proper defaults
+            # Get individual scores with proper defaults (all should be 0-1)
             context_score = scores.get("context_score", 0)
             plagiarism_score = scores.get("plagiarism_score", 0)
             ai_score = scores.get("ai_score", 0)
             grammar_score = scores.get("grammar_score", 0)
             question_total = scores.get("total_score", None)
                 
-            # Add to totals for metric averages (including zeros for unanswered questions)
+            # Add to totals for metric averages (normalized scores 0-1)
             context_sum += context_score
             plagiarism_sum += plagiarism_score
             ai_sum += ai_score
             grammar_sum += grammar_score
             
-            # If the question already has a calculated total score, use that
-            # Otherwise calculate it
+            # Calculate actual question score in points
             if question_total is not None:
                 question_score = question_total
             else:
-                # Calculate question score based on all available metrics
                 question_score = self.calculate_question_score(
                     context_score=context_score,
                     plagiarism_score=plagiarism_score,
@@ -98,22 +96,19 @@ class AssignmentScoreCalculator:
                     grammar_score=grammar_score
                 )
             
-            # Add to total score
+            # Add to total score (this is in actual points)
             total_score += question_score
         
-        # Scale the total score to match the total grade
-        scaled_total_score = (total_score / question_count) * self.total_grade
-        
-        # Calculate averages for all metrics
-        avg_context = context_sum / question_count
-        avg_plagiarism = plagiarism_sum / question_count
-        avg_ai = ai_sum / question_count
-        avg_grammar = grammar_sum / question_count
+        # Calculate averages for all metrics (these remain normalized 0-1)
+        avg_context = context_sum / question_count if question_count > 0 else 0.0
+        avg_plagiarism = plagiarism_sum / question_count if question_count > 0 else 0.0
+        avg_ai = ai_sum / question_count if question_count > 0 else 0.0
+        avg_grammar = grammar_sum / question_count if question_count > 0 else 0.0
         
         return {
-            "total_score": round(scaled_total_score, 2),
-            "avg_context_score": round(avg_context, 4),
-            "avg_plagiarism_score": round(avg_plagiarism, 4),
-            "avg_ai_score": round(avg_ai, 4),
-            "avg_grammar_score": round(avg_grammar, 4)
+            "total_score": round(total_score, 2),  # Actual points (e.g., 85.5/100)
+            "avg_context_score": round(avg_context, 4),  # Normalized (0-1)
+            "avg_plagiarism_score": round(avg_plagiarism, 4),  # Normalized (0-1)
+            "avg_ai_score": round(avg_ai, 4),  # Normalized (0-1)
+            "avg_grammar_score": round(avg_grammar, 4)  # Normalized (0-1)
         }

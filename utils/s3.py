@@ -30,7 +30,23 @@ def upload_to_s3(folder_name, file_name, file_path):
     s3_key = f"{folder_name}/{file_name}"
 
     try:
-        s3_client.upload_file(file_path, bucket_name, s3_key)
+        # Determine if the file is a PDF
+        is_pdf = file_name.lower().endswith('.pdf')
+        
+        # Set upload parameters based on file type
+        if is_pdf:
+            s3_client.upload_file(
+                file_path, 
+                bucket_name, 
+                s3_key,
+                ExtraArgs={
+                    'ContentType': 'application/pdf',
+                    'ContentDisposition': 'inline'
+                }
+            )
+        else:
+            # For non-PDF files, use default behavior
+            s3_client.upload_file(file_path, bucket_name, s3_key)
 
         url = f"https://{bucket_name}.s3.{os.getenv('AWS_DEFAULT_REGION')}.amazonaws.com/{s3_key}"
 
