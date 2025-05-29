@@ -340,29 +340,56 @@ class PDFReportGenerator:
         import tempfile
         import os
         
-        # Clean text inputs that go into PDF to prevent encoding errors
-        student_name = self.clean_text_for_pdf(student_name)
-        course_name = self.clean_text_for_pdf(course_name)
-        assignment_name = self.clean_text_for_pdf(assignment_name)
+        # Sanitize text inputs that go into PDF to prevent encoding errors
+        def sanitize_text(text):
+            """Remove or replace problematic Unicode characters"""
+            if not text:
+                return text
+            
+            # Replace common Unicode characters that cause issues
+            replacements = {
+                '\u2022': '•',  # Bullet point
+                '\u2013': '-',  # En dash
+                '\u2014': '--', # Em dash
+                '\u2018': "'",  # Left single quote
+                '\u2019': "'",  # Right single quote
+                '\u201c': '"',  # Left double quote
+                '\u201d': '"',  # Right double quote
+                '\u2026': '...' # Ellipsis
+            }
+            
+            for unicode_char, replacement in replacements.items():
+                text = text.replace(unicode_char, replacement)
+            
+            # Remove any remaining non-latin1 characters
+            try:
+                text.encode('latin-1')
+                return text
+            except UnicodeEncodeError:
+                # If still problematic, encode and decode to remove issues
+                return text.encode('ascii', 'ignore').decode('ascii')
         
-        # Clean MongoDB feedback data
+        student_name = sanitize_text(student_name)
+        course_name = sanitize_text(course_name)
+        assignment_name = sanitize_text(assignment_name)
+        
+        # Sanitize MongoDB feedback data
         if "overall_feedback" in mongo_data:
-            if isinstance(mongo_data["overall_feedback"], dict):
-                if "content" in mongo_data["overall_feedback"]:
-                    mongo_data["overall_feedback"]["content"] = self.clean_text_for_pdf(
-                        mongo_data["overall_feedback"]["content"]
-                    )
-            elif isinstance(mongo_data["overall_feedback"], str):
-                mongo_data["overall_feedback"] = self.clean_text_for_pdf(mongo_data["overall_feedback"])
+            feedback = mongo_data["overall_feedback"]
+            if isinstance(feedback, dict):
+                if "content" in feedback:
+                    feedback["content"] = sanitize_text(feedback["content"])
+            elif isinstance(feedback, str):
+                mongo_data["overall_feedback"] = sanitize_text(feedback)
         
-        # Clean question feedback
+        # Sanitize question feedback
         if "questions" in mongo_data:
             for question in mongo_data["questions"]:
                 if "feedback" in question:
                     if isinstance(question["feedback"], dict) and "content" in question["feedback"]:
-                        question["feedback"]["content"] = self.clean_text_for_pdf(question["feedback"]["content"])
+                        question["feedback"]["content"] = sanitize_text(question["feedback"]["content"])
                     elif isinstance(question["feedback"], str):
-                        question["feedback"] = self.clean_text_for_pdf(question["feedback"])
+                        question["feedback"] = sanitize_text(question["feedback"])
         
         temp_student_pdf = tempfile.mktemp(suffix='.pdf')
         temp_output_pdf = tempfile.mktemp(suffix='.pdf')

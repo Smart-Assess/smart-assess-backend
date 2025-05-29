@@ -149,13 +149,23 @@ class GrammarChecker:
             return 0.85  # Safe default
 
     def _process_single_chunk(self, text, delay=0):
-        """Process a single chunk of text"""
-        # Try to get correction from API with delay
-        logger.info(f"Checking grammar for chunk with length {len(text)}")
-        result = self.query_api(text, attempt=0, delay=delay)
+        """Process a single chunk of text with encoding safety"""
+        # Skip chunks smaller than 10 characters
+        if len(text.strip()) < 10:
+            logger.info(f"Skipping tiny chunk: '{text[:20]}...'")
+            return text, 1.0  # Perfect score for tiny chunks
+        
+        # Sanitize text before sending to API
+        try:
+            # Ensure text is properly encoded
+            sanitized_text = text.encode('utf-8', 'ignore').decode('utf-8')
+        except:
+            sanitized_text = text
+        
+        logger.info(f"Checking grammar for chunk with length {len(sanitized_text)}")
+        result = self.query_api(sanitized_text, attempt=0, delay=delay)
         
         if result is None:
-            # API failed, provide a reasonable high score as default
             fallback_score = round(random.uniform(0.8, 1.0), 4)
             logger.warning(f"Using fallback grammar score for chunk: {fallback_score}")
             return text, fallback_score
@@ -235,128 +245,147 @@ class GrammarChecker:
         return results
 
     def evaluate(self, text, delay=0):
-        """Evaluate text for grammar correctness with chunking for longer texts"""
+        """Evaluate text for grammar correctness with optimized chunking"""
         if not text or len(text.strip()) < 3:
             logger.info("Empty or very short answer - assigning zero grammar score")
-            return text, 0.0  # Zero score for empty answers
+            return text, 0.0
             
-        # If we already know the service is unavailable, skip API call
         if not self.service_available:
             simulated_score = round(random.uniform(0.8, 1.0), 4)
             logger.info(f"Grammar service unavailable, using simulated score: {simulated_score}")
             return text, simulated_score
         
-        # Define maximum chunk size (characters)
-        MAX_CHUNK_SIZE = 90  # Reduced slightly for safety
+        # INCREASED chunk size for efficiency
+        MAX_CHUNK_SIZE = 500  # Increased from 90 to 500
         
-        # For short texts, process normally
+        # For texts under 500 chars, process as single chunk
         if len(text) <= MAX_CHUNK_SIZE:
             logger.info(f"Processing single chunk with delay: {delay}")
             return self._process_single_chunk(text, delay)
         
-        # For longer texts, split into chunks and process each
-        logger.info(f"Text length {len(text)} exceeds chunk size, splitting into chunks")
+        # For longer texts, use smarter chunking
+        logger.info(f"Text length {len(text)} exceeds chunk size, using optimized chunking")
         
-        # First, preserve the original structure by identifying paragraph breaks
-        paragraphs = re.split(r'(\n\s*\n+)', text)
-        processed_paragraphs = []
+        # Split into larger, meaningful chunks
+        chunks = self._smart_split(text, MAX_CHUNK_SIZE)
+        logger.info(f"Split text into {len(chunks)} optimized chunks")
+        
         all_scores = []
         all_lengths = []
+        corrected_chunks = []
         
-        for p_idx, paragraph in enumerate(paragraphs):
-            # If this is just whitespace/newlines, preserve it exactly
-            if not paragraph.strip():
-                processed_paragraphs.append(paragraph)
-                continue
-                
-            # Process actual text paragraphs
-            if len(paragraph) <= MAX_CHUNK_SIZE:
-                # Apply delay for chunks after the first one
-                chunk_delay = delay if p_idx > 0 else 0
-                corrected, score = self._process_single_chunk(paragraph, chunk_delay)
-                processed_paragraphs.append(corrected)
-                all_scores.append(score)
-                all_lengths.append(len(paragraph))
-            else:
-                # Split longer paragraphs into chunks
-                chunks = self._split_into_chunks(paragraph, MAX_CHUNK_SIZE)
-                logger.info(f"Split paragraph into {len(chunks)} chunks")
-                
-                corrected_chunks = []
-                for i, chunk in enumerate(chunks):
-                    # Add delay between chunks (but not for the very first chunk)
-                    chunk_delay = delay if (i > 0 or p_idx > 0) else 0
-                    
-                    # Process chunk
-                    corrected_chunk, chunk_score = self._process_single_chunk(chunk, chunk_delay)
-                    corrected_chunks.append(corrected_chunk)
-                    all_scores.append(chunk_score)
-                    all_lengths.append(len(chunk))
-                
-                # Join chunks within paragraph
-                processed_paragraphs.append(' '.join(corrected_chunks))
+        for i, chunk in enumerate(chunks):
+            # Only apply delay between chunks, not within
+            chunk_delay = delay if i > 0 else 0
+            
+            corrected_chunk, chunk_score = self._process_single_chunk(chunk, chunk_delay)
+            corrected_chunks.append(corrected_chunk)
+            all_scores.append(chunk_score)
+            all_lengths.append(len(chunk))
         
-        # Join processed paragraphs, preserving original paragraph breaks
-        corrected_text = ''.join(processed_paragraphs)
+        # Join chunks with appropriate spacing
+        corrected_text = ' '.join(corrected_chunks)
         
         # Calculate weighted average score
         if not all_scores:
-            logger.warning("No scores calculated, using default")
-            return text, 0.9  # Default fallback
+            return text, 0.9
         
-        # Weight scores by text length
         total_length = sum(all_lengths)
-        if total_length == 0:
-            logger.warning("Total length is 0, using simple average")
-            weighted_score = sum(all_scores) / len(all_scores)
-        else:
-            weighted_score = sum(
-                score * (length / total_length)
-                for score, length in zip(all_scores, all_lengths)
-            )
+        weighted_score = sum(
+            score * (length / total_length)
+            for score, length in zip(all_scores, all_lengths)
+        ) if total_length > 0 else sum(all_scores) / len(all_scores)
         
         logger.info(f"Final weighted grammar score: {weighted_score} (from {len(all_scores)} chunks)")
-        
         return corrected_text, round(weighted_score, 4)
 
-    def _split_into_chunks(self, text, max_size):
-        """Split text into chunks, trying to preserve sentence boundaries"""
+    def _smart_split(self, text, max_size):
+        """Smart text splitting that avoids tiny chunks"""
+        if len(text) <= max_size:
+            return [text]
+        
         chunks = []
         
-        # Find all sentence boundaries (periods, question marks, exclamation points)
-        sentence_ends = [m.end() for m in re.finditer(r'[.!?]\s+', text)]
+        # First try to split by double newlines (paragraphs)
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
         
-        # Add the end of the text as a final boundary
-        sentence_ends.append(len(text))
-        
-        start = 0
-        
-        while start < len(text):
-            # Find the last sentence boundary that fits in the current chunk
-            chunk_end = start
-            
-            for end in sentence_ends:
-                if end - start <= max_size:
-                    chunk_end = end
+        current_chunk = ""
+        for paragraph in paragraphs:
+            # If adding this paragraph would exceed max_size
+            if len(current_chunk) + len(paragraph) + 2 > max_size:
+                # Save current chunk if it's not empty
+                if current_chunk.strip():
+                    chunks.append(current_chunk.strip())
+                    current_chunk = paragraph
                 else:
-                    break
-            
-            # If no sentence boundary found, or it's the same as start, 
-            # just cut at max_size or end of text
-            if chunk_end == start:
-                chunk_end = min(start + max_size, len(text))
-            
-            # Extract chunk and clean it
-            chunk = text[start:chunk_end].strip()
-            
-            # Only add non-empty chunks
-            if chunk:
-                chunks.append(chunk)
-            
-            # Move to next chunk
-            start = chunk_end
+                    # Paragraph itself is too long, split by sentences
+                    sentences = self._split_by_sentences(paragraph, max_size)
+                    chunks.extend(sentences)
+            else:
+                # Add paragraph to current chunk
+                if current_chunk:
+                    current_chunk += "\n\n" + paragraph
+                else:
+                    current_chunk = paragraph
+        
+        # Add remaining chunk
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+        
+        # Filter out very small chunks and merge them
+        return self._merge_small_chunks(chunks, min_size=50)
+
+    def _split_by_sentences(self, text, max_size):
+        """Split text by sentences, avoiding tiny chunks"""
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        chunks = []
+        current_chunk = ""
+        
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 > max_size:
+                if current_chunk.strip():
+                    chunks.append(current_chunk.strip())
+                    current_chunk = sentence
+                else:
+                    # Single sentence is too long, just cut it
+                    chunks.append(sentence[:max_size])
+            else:
+                if current_chunk:
+                    current_chunk += " " + sentence
+                else:
+                    current_chunk = sentence
+        
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
         
         return chunks
+
+    def _merge_small_chunks(self, chunks, min_size=50):
+        """Merge very small chunks to avoid inefficient API calls"""
+        if not chunks:
+            return chunks
+        
+        merged = []
+        current = ""
+        
+        for chunk in chunks:
+            if len(current) + len(chunk) + 1 <= 500 and len(chunk) < min_size:
+                # Merge small chunk
+                if current:
+                    current += " " + chunk
+                else:
+                    current = chunk
+            else:
+                # Save current and start new
+                if current:
+                    merged.append(current)
+                current = chunk
+        
+        # Add remaining
+        if current:
+            merged.append(current)
+        
+        return merged
 
 if __name__ =="__main__":
     grammar  = GrammarChecker()
