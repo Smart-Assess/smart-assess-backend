@@ -116,7 +116,7 @@ class PDFReportGenerator:
         grammar_score = overall_scores.get("grammar", {}).get("score", 0)
         
         scores = [context_score, plagiarism_score, ai_score, grammar_score]
-        labels = ["Context", "Originality", "AI Detection", "Grammar"]
+        labels = ["Context", "Plagiarism", "AI Detection", "Grammar"]
         
         # Create the chart
         plt.figure(figsize=(7, 3.5))
@@ -188,7 +188,7 @@ class PDFReportGenerator:
                 # Create a table for component scores
                 component_scores = [
                     ("Context", scores.get("context", {}).get("score", 0)),
-                    ("Originality", scores.get("plagiarism", {}).get("score", 0)),
+                    ("Plagiarism", scores.get("plagiarism", {}).get("score", 0)),
                     ("AI Detection", scores.get("ai_detection", {}).get("score", 0)),
                     ("Grammar", scores.get("grammar", {}).get("score", 0))
                 ]
