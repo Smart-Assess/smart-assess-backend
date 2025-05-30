@@ -17,8 +17,9 @@ from utils.s3 import upload_to_s3, delete_from_s3
 from utils.security import get_password_hash
 
 from fastapi import HTTPException
-from utils.smtp import send_email  
+from utils.smtp import send_email
 import os
+
 router = APIRouter()
 
 
@@ -39,8 +40,7 @@ async def add_university(
     current_admin: SuperAdmin = Depends(get_current_admin),
 ):
     existing_university = (
-        db.query(University).filter(
-            University.email == university_email).first()
+        db.query(University).filter(University.email == university_email).first()
     )
     if existing_university:
         raise HTTPException(
@@ -48,8 +48,7 @@ async def add_university(
         )
 
     existing_admin = (
-        db.query(UniversityAdmin).filter(
-            UniversityAdmin.email == admin_email).first()
+        db.query(UniversityAdmin).filter(UniversityAdmin.email == admin_email).first()
     )
     if existing_admin:
         raise HTTPException(
@@ -63,7 +62,9 @@ async def add_university(
             os.makedirs("temp", exist_ok=True)
             buffer.write(await image.read())
         image_url = upload_to_s3(
-            folder_name="university_images", file_name=image.filename, file_path=image_path
+            folder_name="university_images",
+            file_name=image.filename,
+            file_path=image_path,
         )
         if not image_url:
             raise HTTPException(
@@ -83,7 +84,7 @@ async def add_university(
         image_url=image_url,
         super_admin_id=current_admin.id,
     )
-    
+
     db.add(new_university)
     db.commit()
     db.refresh(new_university)
@@ -96,7 +97,7 @@ async def add_university(
         university_id=new_university.id,
     )
 
-    send_email(university_email,admin_email,admin_password,"admin")
+    send_email(university_email, admin_email, admin_password, "admin")
     db.add(new_university_admin)
     db.commit()
 
@@ -114,26 +115,28 @@ async def get_university(
     db: Session = Depends(get_db),
     current_admin: SuperAdmin = Depends(get_current_admin),
 ):
-    university = db.query(University).filter(
-        University.id == university_id,
-        University.super_admin_id == current_admin.id
-    ).first()
+    university = (
+        db.query(University)
+        .filter(
+            University.id == university_id,
+            University.super_admin_id == current_admin.id,
+        )
+        .first()
+    )
 
     if not university:
         raise HTTPException(
-            status_code=404,
-            detail="University not found or access denied"
+            status_code=404, detail="University not found or access denied"
         )
 
-    university_admin = db.query(UniversityAdmin).filter(
-        UniversityAdmin.university_id == university_id
-    ).first()
+    university_admin = (
+        db.query(UniversityAdmin)
+        .filter(UniversityAdmin.university_id == university_id)
+        .first()
+    )
 
     if not university_admin:
-        raise HTTPException(
-            status_code=404,
-            detail="University admin not found"
-        )
+        raise HTTPException(status_code=404, detail="University admin not found")
 
     return {
         "success": True,
@@ -157,7 +160,7 @@ async def get_university(
             "password": university_admin.password,
             "university_id": university_admin.university_id,
             "created_at": university_admin.created_at,
-        }
+        },
     }
 
 
@@ -170,31 +173,39 @@ async def get_universities(
 ):
     offset = (page - 1) * limit
 
-    total = db.query(University).filter(
-        University.super_admin_id == current_admin.id
-    ).count()
+    total = (
+        db.query(University)
+        .filter(University.super_admin_id == current_admin.id)
+        .count()
+    )
 
-    universities = db.query(University).filter(
-        University.super_admin_id == current_admin.id
-    ).offset(offset).limit(limit).all()
+    universities = (
+        db.query(University)
+        .filter(University.super_admin_id == current_admin.id)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     universities_data = []
     for uni in universities:
-        teachers_count = db.query(Teacher).filter(
-            Teacher.university_id == uni.id
-        ).count()
-        
-        students_count = db.query(Student).filter(
-            Student.university_id == uni.id
-        ).count()
-        
-        universities_data.append({
-            "uni_id": f"Id-{str(uni.id).zfill(4)}",
-            "id": uni.id,
-            "name": uni.name,
-            "students_count": students_count,
-            "teachers_count": teachers_count,
-        })
+        teachers_count = (
+            db.query(Teacher).filter(Teacher.university_id == uni.id).count()
+        )
+
+        students_count = (
+            db.query(Student).filter(Student.university_id == uni.id).count()
+        )
+
+        universities_data.append(
+            {
+                "uni_id": f"Id-{str(uni.id).zfill(4)}",
+                "id": uni.id,
+                "name": uni.name,
+                "students_count": students_count,
+                "teachers_count": teachers_count,
+            }
+        )
 
     return {
         "success": True,
@@ -212,38 +223,43 @@ async def get_universities(
 async def delete_university(
     university_id: int,
     db: Session = Depends(get_db),
-    current_admin: SuperAdmin = Depends(get_current_admin)
+    current_admin: SuperAdmin = Depends(get_current_admin),
 ):
 
-    university = db.query(University).filter(
-        University.id == university_id,
-        University.super_admin_id == current_admin.id
-    ).first()
+    university = (
+        db.query(University)
+        .filter(
+            University.id == university_id,
+            University.super_admin_id == current_admin.id,
+        )
+        .first()
+    )
 
     if not university:
         raise HTTPException(
-            status_code=404,
-            detail="University not found or access denied"
+            status_code=404, detail="University not found or access denied"
         )
 
     try:
         # Count records that will be deleted for reporting
-        admin_count = db.query(UniversityAdmin).filter(
-            UniversityAdmin.university_id == university_id
-        ).count()
-        
-        teacher_count = db.query(Teacher).filter(
-            Teacher.university_id == university_id
-        ).count()
-        
-        student_count = db.query(Student).filter(
-            Student.university_id == university_id
-        ).count()
-        
+        admin_count = (
+            db.query(UniversityAdmin)
+            .filter(UniversityAdmin.university_id == university_id)
+            .count()
+        )
+
+        teacher_count = (
+            db.query(Teacher).filter(Teacher.university_id == university_id).count()
+        )
+
+        student_count = (
+            db.query(Student).filter(Student.university_id == university_id).count()
+        )
+
         # Delete university (with cascade)
         db.delete(university)
         db.commit()
-        
+
         return {
             "success": True,
             "status": 200,
@@ -251,14 +267,13 @@ async def delete_university(
             "details": {
                 "admins_deleted": admin_count,
                 "teachers_deleted": teacher_count,
-                "students_deleted": student_count
-            }
+                "students_deleted": student_count,
+            },
         }
     except Exception as e:
         db.rollback()
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete university: {str(e)}"
+            status_code=500, detail=f"Failed to delete university: {str(e)}"
         )
 
 
@@ -277,53 +292,72 @@ async def update_university(
     admin_password: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_admin: SuperAdmin = Depends(get_current_admin)
+    current_admin: SuperAdmin = Depends(get_current_admin),
 ):
     # Check if university exists
-    university = db.query(University).filter(
-        University.id == university_id,
-        University.super_admin_id == current_admin.id
-    ).first()
+    university = (
+        db.query(University)
+        .filter(
+            University.id == university_id,
+            University.super_admin_id == current_admin.id,
+        )
+        .first()
+    )
 
     if not university:
-        raise HTTPException(status_code=404, detail="University not found or access denied")
+        raise HTTPException(
+            status_code=404, detail="University not found or access denied"
+        )
 
     # Check if email is taken by another university
     if university_email and university_email != university.email:
-        existing_university = db.query(University).filter(
-            University.email == university_email,
-            University.id != university_id
-        ).first()
+        existing_university = (
+            db.query(University)
+            .filter(
+                University.email == university_email, University.id != university_id
+            )
+            .first()
+        )
         if existing_university:
-            raise HTTPException(status_code=400, detail="Email already taken by another university")
+            raise HTTPException(
+                status_code=400, detail="Email already taken by another university"
+            )
 
     # Fetch associated university admin
-    university_admin = db.query(UniversityAdmin).filter(
-        UniversityAdmin.university_id == university.id
-    ).first()
+    university_admin = (
+        db.query(UniversityAdmin)
+        .filter(UniversityAdmin.university_id == university.id)
+        .first()
+    )
 
     if not university_admin:
         raise HTTPException(status_code=404, detail="University admin not found")
 
     # Check if admin email is taken
     if admin_email and admin_email != university_admin.email:
-        existing_admin = db.query(UniversityAdmin).filter(
-            UniversityAdmin.email == admin_email,
-            UniversityAdmin.id != university_admin.id
-        ).first()
+        existing_admin = (
+            db.query(UniversityAdmin)
+            .filter(
+                UniversityAdmin.email == admin_email,
+                UniversityAdmin.id != university_admin.id,
+            )
+            .first()
+        )
         if existing_admin:
-            raise HTTPException(status_code=400, detail="Email already taken by another admin")
+            raise HTTPException(
+                status_code=400, detail="Email already taken by another admin"
+            )
 
     # Handle image upload if provided
     if image:
         try:
             # Validate file type
-            allowed_extensions = ['jpg', 'jpeg', 'png', 'gif']
-            file_extension = image.filename.split('.')[-1].lower()
+            allowed_extensions = ["jpg", "jpeg", "png", "gif"]
+            file_extension = image.filename.split(".")[-1].lower()
             if file_extension not in allowed_extensions:
                 raise HTTPException(
                     status_code=400,
-                    detail="Only JPG, JPEG, PNG, and GIF files are allowed"
+                    detail="Only JPG, JPEG, PNG, and GIF files are allowed",
                 )
 
             # Delete the old image if it exists
@@ -336,17 +370,17 @@ async def update_university(
             temp_dir = "temp"
             os.makedirs(temp_dir, exist_ok=True)
             image_path = os.path.join(temp_dir, image.filename)
-            
+
             with open(image_path, "wb") as buffer:
                 buffer.write(await image.read())
 
             # Upload the new image to S3
             image_url = upload_to_s3(
-                folder_name="university_images", 
-                file_name=f"{university.id}_{image.filename}", 
-                file_path=image_path
+                folder_name="university_images",
+                file_name=f"{university.id}_{image.filename}",
+                file_path=image_path,
             )
-            
+
             if not image_url:
                 raise HTTPException(
                     status_code=500, detail="Failed to upload university image"
@@ -354,10 +388,10 @@ async def update_university(
 
             # Clean up the temporary file
             os.remove(image_path)
-            
+
             # Update the university's image URL
             university.image_url = image_url
-            
+
         except Exception as e:
             print(f"Error handling image upload: {e}")
             raise HTTPException(
@@ -393,11 +427,11 @@ async def update_university(
         db.commit()
         db.refresh(university)
         db.refresh(university_admin)
-        
+
         # Only send email if password was updated
         if admin_password:
             send_email(university_admin.email, "", admin_password, "admin")
-            
+
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -417,11 +451,11 @@ async def update_university(
             "city": university.city,
             "state": university.state,
             "zipcode": university.zipcode,
-            "image_url": university.image_url
+            "image_url": university.image_url,
         },
         "admin": {
             "id": university_admin.id,
             "name": university_admin.name,
-            "email": university_admin.email
-        }
+            "email": university_admin.email,
+        },
     }

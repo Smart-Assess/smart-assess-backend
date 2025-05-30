@@ -1,7 +1,9 @@
-# <img src="https://github.com/smart-Assess.png"  height=30px> Smart Assess Backend 
+
+![Screenshot from 2025-05-30 21-41-40](https://github.com/user-attachments/assets/d2a43fd3-e90f-4f34-a583-b11b5b04fa57) 
+
 
 ![Supported python versions](https://img.shields.io/badge/python-3.7%20%7C%203.8%20%7C%203.9%20%7C%203.10%20%7C%203.11-blue)
-[![PEP8](https://img.shields.io/badge/code%20style-pep8-black.svg)](https://www.python.org/dev/peps/pep-0008/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![License](https://img.shields.io/badge/License-MIT%202.0-blue.svg)](LICENSE)
 [![Run Pytest](https://github.com/samadpls/BestRAG/actions/workflows/pytest.yml/badge.svg?branch=main)](https://github.com/samadpls/BestRAG/actions/workflows/pytest.yml)
 
