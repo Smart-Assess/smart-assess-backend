@@ -17,7 +17,7 @@ class AIDetector:
         self.assignment_id = assignment_id
 
         # Configure service URLs
-        self.ai_service_host = "https://ai-detection-47kng.ondigitalocean.app"
+        self.ai_service_host = "https://ai-detection-service.example.com"  # Replace with actual service URL
         self.ai_service_url = f"{self.ai_service_host}/detect"
         self.health_url = f"{self.ai_service_host}/health"
         

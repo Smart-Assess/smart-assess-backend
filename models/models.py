@@ -17,7 +17,7 @@ from sqlalchemy.orm import relationship, sessionmaker
 from datetime import datetime
 from passlib.context import CryptContext
 
-DATABASE_URL = "postgresql://avnadmin:AVNS_mCX_DjHMFQgYit8p4lL@fypdb-fypdb.i.aivencloud.com:27272/defaultdb?sslmode=require"
+DATABASE_URL = "sqlite:///./university_management.db"  # Change this to your database URL
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
