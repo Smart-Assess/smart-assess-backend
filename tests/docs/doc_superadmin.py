@@ -12,59 +12,61 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
+
 def create_superadmin(email: str, password: str):
     session = SessionLocal()
-    
+
     try:
         hashed_password = get_password_hash(password)
         new_superadmin = SuperAdmin(email=email, password=hashed_password)
         session.add(new_superadmin)
         session.commit()
-        
+
         print(f"SuperAdmin created with email: {email}")
     except Exception as e:
         session.rollback()
         print(f"Error creating SuperAdmin: {e}")
     finally:
         session.close()
-        
+
 
 # Config
 BASE_URL = "http://127.0.0.1:8000"
 
+
 def get_auth_token():
     login_data = {
-        'grant_type': 'password',
-        'username': 'sa@gmail.com',
-        'password': '12345',
-        'scope': '',
-        'client_id': '',
-        'client_secret': ''
+        "grant_type": "password",
+        "username": "sa@gmail.com",
+        "password": "12345",
+        "scope": "",
+        "client_id": "",
+        "client_secret": "",
     }
-    
+
     headers = {
-        'accept': 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded'
+        "accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
     }
 
     try:
         login_response = requests.post(
-            f"{BASE_URL}/login",
-            data=login_data,
-            headers=headers
+            f"{BASE_URL}/login", data=login_data, headers=headers
         )
-        
+
         if login_response.status_code != 200:
             print(f"Login failed: {login_response.text}")
             return None
-            
+
         return login_response.json()["access_token"]
     except Exception as e:
         print(f"Login error: {str(e)}")
         return None
+
 
 def test_add_university():
     # Get token
@@ -72,7 +74,7 @@ def test_add_university():
     if not token:
         print("Failed to get authorization token")
         return
-    
+
     # Test data
     data = {
         "university_name": "Test University",
@@ -84,16 +86,14 @@ def test_add_university():
         "zipcode": "12345",
         "admin_name": "Admin Test",
         "admin_email": "ua@gmail.com",  # Updated admin email
-        "admin_password": "12345"
+        "admin_password": "12345",
     }
 
     # Handle image
     files = None
     image_path = Path("pfp.jpg")
     if image_path.exists():
-        files = {
-            'image': ('test_image.jpg', open(image_path, 'rb'), 'image/jpeg')
-        }
+        files = {"image": ("test_image.jpg", open(image_path, "rb"), "image/jpeg")}
 
     # Prepare form data
     form_data = {k: (None, v) for k, v in data.items()}
@@ -104,16 +104,15 @@ def test_add_university():
         response = requests.post(
             f"{BASE_URL}/superadmin/university",
             files=form_data,
-            headers={
-                'Authorization': f'Bearer {token}'
-            }
+            headers={"Authorization": f"Bearer {token}"},
         )
-        
+
         print(f"Status Code: {response.status_code}")
         print(f"Response: {response.json()}")
-        
+
     except Exception as e:
         print(f"Error: {str(e)}")
+
 
 def test_update_university():
     token = get_auth_token()
@@ -131,14 +130,16 @@ def test_update_university():
     response = requests.put(
         f"{BASE_URL}/superadmin/university/{university_id}",
         data=data,  # Use `data` for form fields
-        headers=headers
+        headers=headers,
     )
 
     # Debugging output in case of failure
     print("Response Status Code:", response.status_code)
     print("Response JSON:", response.json())
 
-    assert response.status_code == 200, f"Unexpected status code: {response.status_code}"
+    assert (
+        response.status_code == 200
+    ), f"Unexpected status code: {response.status_code}"
     response_json = response.json()
     assert response_json["success"] is True
     assert response_json["university"]["street_address"] == data["street_address"]
@@ -162,29 +163,29 @@ def test_update_university_admin():
     response = requests.put(
         f"{BASE_URL}/superadmin/university/{university_id}",
         data=data,  # Use `data` for form fields
-        headers=headers
+        headers=headers,
     )
 
     # Debugging output in case of failure
     print("Response Status Code:", response.status_code)
     print("Response JSON:", response.json())
 
-    assert response.status_code == 200, f"Unexpected status code: {response.status_code}"
+    assert (
+        response.status_code == 200
+    ), f"Unexpected status code: {response.status_code}"
     response_json = response.json()
     assert response_json["success"] is True
     assert response_json["admin"]["name"] == data["admin_name"]
     # assert response_json["admin"]["email"] == data["admin_email"]
 
+
 if __name__ == "__main__":
     test_update_university_admin()
     # create_superadmin(email="sa@gmail.com", password="12345")
-    
-
-
 
 
 #################################
-#use me in emergency
+# use me in emergency
 #################################
 # from sqlalchemy import create_engine, MetaData, text
 # from sqlalchemy.orm import sessionmaker
@@ -218,7 +219,7 @@ if __name__ == "__main__":
 #     drop_unwanted_tables(session)
 
 # print("All unwanted tables dropped successfully!")
-#or use
+# or use
 # DROP TABLE IF EXISTS ai_models CASCADE;
 # DROP TABLE IF EXISTS school_admins CASCADE;
 # DROP TABLE IF EXISTS super_admins CASCADE;
@@ -262,7 +263,7 @@ if __name__ == "__main__":
 #         "tool_name": None,
 #         "tool_args": None
 #     }
-    
+
 #     # Define regular expressions to capture the content within tags
 #     tag_patterns = {
 #         "response": r"<response>(.*?)</response>",
@@ -270,7 +271,7 @@ if __name__ == "__main__":
 #         "tool_name": r"<tool_name>(.*?)</tool_name>",
 #         "tool_args": r"<tool_args>(.*?)</tool_args>"
 #     }
-    
+
 #     # Extract content for each tag
 #     for tag, pattern in tag_patterns.items():
 #         match = re.search(pattern, response, re.DOTALL)
@@ -296,7 +297,7 @@ if __name__ == "__main__":
 #             print("Python code execution result > ",code_execution_result)
 #             messages.append({"role": "user", "content": f"Code Execution Result: {code_execution_result}"})
 #             continue
-            
+
 #         if parsed_response['tool_name'] and parsed_response['tool_args']:
 #             print("Tool Call wtth args > ", parsed_response['tool_args'])
 #             result = search_study_content(**json.loads(parsed_response['tool_args']))
@@ -318,35 +319,7 @@ if __name__ == "__main__":
 #         messages.append({"role": "assistant", "content": response})
 #         break
 
-
-    # print(parsed_response)
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# print(parsed_response)
 
 
 # db_interface = BookVectorDB(8, "maths")
@@ -358,8 +331,6 @@ if __name__ == "__main__":
 # collection_name = "grade_8_subject_maths_vectors"
 # client.delete_collection(collection_name)
 # print(client.get_collections())
-
-
 
 
 # from vectordb.pdf_page_finder import PDFPageFinderAgent
@@ -375,33 +346,6 @@ if __name__ == "__main__":
 #     print("No content found in the specified range.")
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # from sqlalchemy import create_engine
 # from sqlalchemy.orm import sessionmaker
 # from model import Base, Student, get_password_hash
@@ -414,22 +358,22 @@ if __name__ == "__main__":
 # def insert_student(email: str, plain_password: str, username: str):
 #     # Create a new database session
 #     session = SessionLocal()
-    
+
 #     # Hash the password
 #     hashed_password = get_password_hash(plain_password)
-    
+
 #     # Create a new Student object
 #     new_student = Student(email=email, password=hashed_password, username=username)
-    
+
 #     # Add the new student to the session
 #     session.add(new_student)
-    
+
 #     # Commit the transaction to save the student in the database
 #     session.commit()
-    
+
 #     # Close the session
 #     session.close()
-    
+
 #     print(f"Student with email '{email}' has been successfully added.")
 
 # # Test the insertion
@@ -438,5 +382,5 @@ if __name__ == "__main__":
 #     test_email = "osafh486@gmail.com"
 #     test_username= "osaf"
 #     test_password = "1234"
-    
+
 #     insert_student(test_email, test_password, username=test_username)

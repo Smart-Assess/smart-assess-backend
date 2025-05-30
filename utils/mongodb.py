@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class MongoDB:
     _instance = None
     _client = None
@@ -18,7 +19,7 @@ class MongoDB:
     def __init__(self):
         if MongoDB._client is None:
             MongoDB._client = MongoClient(os.getenv("MONGO_URI"))
-            MongoDB._db = MongoDB._client['FYP']
+            MongoDB._db = MongoDB._client["FYP"]
 
     @property
     def db(self):
@@ -26,6 +27,7 @@ class MongoDB:
 
     def get_collection(self, collection_name):
         return self.db[collection_name]
+
 
 # Global instance
 mongo_db = MongoDB.get_instance()

@@ -17,84 +17,83 @@ import os
 
 from bleurt import score
 import tensorflow.compat.v1 as tf
+
 tf.enable_eager_execution()
 
 
 references = [
     "An apple a day keeps the doctor away.",
-    "An apple a day keeps the doctor away."
+    "An apple a day keeps the doctor away.",
 ]
 candidates = [
     "An apple a day keeps the doctor away.",
-    "An apple a day keeps doctors away."
+    "An apple a day keeps doctors away.",
 ]
 ref_scores = [0.910811, 0.771989]
 
 
 def get_test_checkpoint():
-  pkg = os.path.abspath(__file__)
-  pkg, _ = os.path.split(pkg)
-  ckpt = os.path.join(pkg, "test_checkpoint")
-  assert tf.io.gfile.exists(ckpt)
-  return ckpt
+    pkg = os.path.abspath(__file__)
+    pkg, _ = os.path.split(pkg)
+    ckpt = os.path.join(pkg, "test_checkpoint")
+    assert tf.io.gfile.exists(ckpt)
+    return ckpt
 
 
 class ScoreTest(tf.test.TestCase):
 
-  def test_default_bleurt_score(self):
-    bleurt = score.BleurtScorer()
-    scores = bleurt.score(references=references, candidates=candidates)
-    self.assertLen(scores, 2)
-    self.assertAllClose(scores, ref_scores)
+    def test_default_bleurt_score(self):
+        bleurt = score.BleurtScorer()
+        scores = bleurt.score(references=references, candidates=candidates)
+        self.assertLen(scores, 2)
+        self.assertAllClose(scores, ref_scores)
 
-  def test_positional_args_error(self):
-    bleurt = score.BleurtScorer()
-    with self.assertRaises(AssertionError):
-      _ = bleurt.score(references, candidates)
+    def test_positional_args_error(self):
+        bleurt = score.BleurtScorer()
+        with self.assertRaises(AssertionError):
+            _ = bleurt.score(references, candidates)
 
-  def test_bleurt_nulls(self):
-    bleurt = score.BleurtScorer()
-    test_references = []
-    test_candidates = []
-    scores = bleurt.score(
-        references=test_references, candidates=test_candidates)
-    self.assertLen(scores, 0)
+    def test_bleurt_nulls(self):
+        bleurt = score.BleurtScorer()
+        test_references = []
+        test_candidates = []
+        scores = bleurt.score(references=test_references, candidates=test_candidates)
+        self.assertLen(scores, 0)
 
-  def test_bleurt_empty(self):
-    bleurt = score.BleurtScorer()
-    test_references = [""]
-    test_candidates = [""]
-    scores = bleurt.score(
-        references=test_references, candidates=test_candidates)
-    self.assertLen(scores, 1)
+    def test_bleurt_empty(self):
+        bleurt = score.BleurtScorer()
+        test_references = [""]
+        test_candidates = [""]
+        scores = bleurt.score(references=test_references, candidates=test_candidates)
+        self.assertLen(scores, 1)
 
-  def test_bleurt_score_with_checkpoint(self):
-    checkpoint = get_test_checkpoint()
-    bleurt = score.BleurtScorer(checkpoint)
-    scores = bleurt.score(references=references, candidates=candidates)
-    self.assertLen(scores, 2)
-    self.assertAllClose(scores, ref_scores)
+    def test_bleurt_score_with_checkpoint(self):
+        checkpoint = get_test_checkpoint()
+        bleurt = score.BleurtScorer(checkpoint)
+        scores = bleurt.score(references=references, candidates=candidates)
+        self.assertLen(scores, 2)
+        self.assertAllClose(scores, ref_scores)
 
-  def test_tf_bleurt_score_eager(self):
-    # Creates the TF Graph.
-    bleurt_ops = score.create_bleurt_ops()
-    tfcandidates = tf.constant(candidates)
-    tfreferences = tf.constant(references)
-    bleurt_out = bleurt_ops(references=tfreferences, candidates=tfcandidates)
+    def test_tf_bleurt_score_eager(self):
+        # Creates the TF Graph.
+        bleurt_ops = score.create_bleurt_ops()
+        tfcandidates = tf.constant(candidates)
+        tfreferences = tf.constant(references)
+        bleurt_out = bleurt_ops(references=tfreferences, candidates=tfcandidates)
 
-    # Computes the BLEURT scores.
-    self.assertIn("predictions", bleurt_out)
-    self.assertEqual(bleurt_out["predictions"].shape, (2,))
-    self.assertAllClose(bleurt_out["predictions"], ref_scores)
+        # Computes the BLEURT scores.
+        self.assertIn("predictions", bleurt_out)
+        self.assertEqual(bleurt_out["predictions"].shape, (2,))
+        self.assertAllClose(bleurt_out["predictions"], ref_scores)
 
-  def test_tf_bleurt_positional_args_error(self):
-    # Creates the TF Graph.
-    bleurt_ops = score.create_bleurt_ops()
-    tfcandidates = tf.constant(candidates)
-    tfreferences = tf.constant(references)
-    with self.assertRaises(AssertionError):
-      _ = bleurt_ops(tfreferences, tfcandidates)
+    def test_tf_bleurt_positional_args_error(self):
+        # Creates the TF Graph.
+        bleurt_ops = score.create_bleurt_ops()
+        tfcandidates = tf.constant(candidates)
+        tfreferences = tf.constant(references)
+        with self.assertRaises(AssertionError):
+            _ = bleurt_ops(tfreferences, tfcandidates)
 
 
 if __name__ == "__main__":
-  tf.test.main()
+    tf.test.main()
