@@ -2,8 +2,10 @@ from datetime import datetime, timezone
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from pymongo import UpdateOne
-
 from utils.mongodb import mongo_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PlagiarismChecker:
@@ -17,240 +19,327 @@ class PlagiarismChecker:
         self.course_id = course_id
         self.assignment_id = assignment_id
         self.similarity_threshold = similarity_threshold
-        self.submission_ids = submission_ids or []  # List of submission_ids
-
+        self.submission_ids = submission_ids or []
         self.questions_answers_by_pdf = {}
         self.teacher_questions = {}
         self.similarity_results = {}
-
-        # MongoDB setup
         self.db = mongo_db.db
         self.results_collection = self.db["evaluation_results"]
 
     def find_common_parts(self, answer_1: str, answer_2: str) -> str:
-        """Find common parts between two answers by comparing sentences."""
-        answer_1_sentences = set(answer_1.split(". "))
-        answer_2_sentences = set(answer_2.split(". "))
+        answer_1_sentences = set(s.strip() for s in answer_1.split(".") if s.strip())
+        answer_2_sentences = set(s.strip() for s in answer_2.split(".") if s.strip())
         common_sentences = answer_1_sentences.intersection(answer_2_sentences)
-        return ". ".join(common_sentences)
+        return ". ".join(sorted(list(common_sentences))) if common_sentences else ""
 
     def compare_answers(self):
-        """Compare answers between student submissions"""
         self.similarity_results = {
             pdf_file: {} for pdf_file in self.questions_answers_by_pdf
         }
+        pdf_files_processed = list(self.questions_answers_by_pdf.keys())
 
-        for i, pdf_file in enumerate(self.questions_answers_by_pdf):
-            current_qa_dict = self.questions_answers_by_pdf.get(pdf_file, {})
+        for i, current_pdf_file in enumerate(pdf_files_processed):
+            current_qa_dict = self.questions_answers_by_pdf.get(current_pdf_file, {})
+            self.similarity_results[current_pdf_file] = {}
 
             for question_key in self.teacher_questions:
                 if not question_key.startswith("Question#"):
                     continue
-
                 answer_key = f"Answer#{question_key.split('#')[1]}"
                 current_answer = current_qa_dict.get(answer_key, "").strip()
 
-                # Handle empty answers explicitly
-                if not current_answer or len(current_answer) < 3:
-                    print(
-                        f"Empty or very short answer for {pdf_file} - {answer_key} - assigning zero plagiarism score"
+                if not current_answer or len(current_answer.split()) < 5:  # Min 5 words
+                    logger.info(
+                        f"Empty or very short answer for {current_pdf_file} - {answer_key} - assigning zero plagiarism score"
                     )
-                    self.similarity_results[pdf_file][question_key] = {
+                    self.similarity_results[current_pdf_file][question_key] = {
                         "Comparisons": {},
                         "max_similarity": 0.0,
                         "copied_sentence": "",
+                        "compared_with_submission_id": None,
                     }
-                    continue  # Skip further processing for empty answers
+                    continue
 
                 question_result = {
                     "Comparisons": {},
                     "max_similarity": 0.0,
                     "copied_sentence": "",
+                    "compared_with_submission_id": None,
                 }
 
-                for j, other_pdf in enumerate(self.questions_answers_by_pdf):
+                for j, other_pdf_file in enumerate(pdf_files_processed):
                     if i == j:
                         continue
 
-                    other_qa_dict = self.questions_answers_by_pdf.get(other_pdf, {})
+                    other_submission_id = (
+                        self.submission_ids[j]
+                        if j < len(self.submission_ids)
+                        else other_pdf_file
+                    )
+
+                    other_qa_dict = self.questions_answers_by_pdf.get(
+                        other_pdf_file, {}
+                    )
                     other_answer = other_qa_dict.get(answer_key, "").strip()
 
-                    if not current_answer or not other_answer:
+                    if not other_answer or len(other_answer.split()) < 5:  # Min 5 words
                         similarity = 0.0
                         copied_sentence = ""
                     else:
-                        common_parts = self.find_common_parts(
-                            current_answer, other_answer
-                        )
-                        vectorizer = TfidfVectorizer()
-                        tfidf_matrix = vectorizer.fit_transform(
-                            [current_answer, other_answer]
-                        )
-                        similarity = cosine_similarity(
-                            tfidf_matrix[0:1], tfidf_matrix[1:2]
-                        )[0][0]
-                        copied_sentence = (
-                            common_parts
-                            if similarity >= self.similarity_threshold
-                            else ""
-                        )
+                        try:
+                            vectorizer = TfidfVectorizer()
+                            tfidf_matrix = vectorizer.fit_transform(
+                                [current_answer, other_answer]
+                            )
+                            similarity = cosine_similarity(
+                                tfidf_matrix[0:1], tfidf_matrix[1:2]
+                            )[0][0]
+                        except (
+                            ValueError
+                        ):  # Happens if one of the answers is empty after vectorization
+                            similarity = 0.0
 
-                    question_result["Comparisons"][other_pdf] = {
-                        "similarity": similarity,
+                        copied_sentence = ""
+                        if similarity >= self.similarity_threshold:
+                            copied_sentence = self.find_common_parts(
+                                current_answer, other_answer
+                            )
+
+                    question_result["Comparisons"][other_submission_id] = {
+                        "similarity": round(similarity, 4),
                         "copied_sentence": copied_sentence,
                     }
 
                     if similarity > question_result["max_similarity"]:
-                        question_result["max_similarity"] = similarity
+                        question_result["max_similarity"] = round(similarity, 4)
                         question_result["copied_sentence"] = copied_sentence
-
-                self.similarity_results[pdf_file][question_key] = question_result
-
-    def save_results_to_mongo(self, submission_id, results):
-        """Save plagiarism scores in unified evaluation document"""
-        similarity_data = results.get("similarity_data", {})
-        pdf_file = results.get("pdf_file", "")
-        qa_results = results.get("qa_results", {})
-
-        # Calculate overall similarity
-        total_similarity = 0
-        question_count = 0
-        question_updates = []
-
-        for q_key in qa_results:
-            if q_key.startswith("Question#"):
-                q_num = int(q_key.split("#")[1])
-                if q_key in similarity_data:
-                    max_similarity = similarity_data[q_key].get("max_similarity", 0)
-                    copied_sentence = similarity_data[q_key].get("copied_sentence", "")
-
-                    # Create proper UpdateOne object
-                    question_updates.append(
-                        UpdateOne(
-                            {
-                                "course_id": self.course_id,
-                                "assignment_id": self.assignment_id,
-                                "submission_id": submission_id,
-                                "questions.question_number": q_num,
-                            },
-                            {
-                                "$set": {
-                                    "questions.$.scores.plagiarism": {
-                                        "score": round(max_similarity, 4),
-                                        "copied_sentence": copied_sentence,
-                                        "evaluated_at": datetime.now(timezone.utc),
-                                    }
-                                }
-                            },
+                        question_result["compared_with_submission_id"] = (
+                            other_submission_id
                         )
+
+                self.similarity_results[current_pdf_file][
+                    question_key
+                ] = question_result
+
+    def save_results_to_mongo(self):
+        operations = []
+        pdf_files_list = list(self.questions_answers_by_pdf.keys())
+
+        for pdf_idx, pdf_file in enumerate(pdf_files_list):
+            submission_id = (
+                self.submission_ids[pdf_idx]
+                if pdf_idx < len(self.submission_ids)
+                else pdf_file
+            )
+
+            similarity_data_for_pdf = self.similarity_results.get(pdf_file, {})
+            question_scores_for_mongo = []
+            valid_similarities_for_overall = []
+
+            for q_key, data in similarity_data_for_pdf.items():
+                if q_key.startswith("Question#"):
+                    q_num = int(q_key.split("#")[1])
+                    max_similarity = data.get("max_similarity", 0.0)
+                    copied_sentence = data.get("copied_sentence", "")
+                    compared_with_submission_id = data.get(
+                        "compared_with_submission_id"
                     )
 
-                    total_similarity += max_similarity
-                    question_count += 1
+                    question_scores_for_mongo.append(
+                        {
+                            "question_number": q_num,
+                            "scores": {
+                                "plagiarism": {
+                                    "score": round(max_similarity, 4),
+                                    "copied_sentence": copied_sentence,
+                                    "compared_with_submission_id": compared_with_submission_id,
+                                    "evaluated_at": datetime.now(timezone.utc),
+                                }
+                            },
+                        }
+                    )
+                    valid_similarities_for_overall.append(max_similarity)
 
-        # First ensure document exists with questions array
-        self.results_collection.update_one(
-            {
-                "course_id": self.course_id,
-                "assignment_id": self.assignment_id,
-                "submission_id": submission_id,
-            },
-            {
+            overall_plagiarism_score = 0.0
+            if valid_similarities_for_overall:
+                overall_plagiarism_score = round(
+                    sum(valid_similarities_for_overall)
+                    / len(valid_similarities_for_overall),
+                    4,
+                )
+
+            update_doc = {
                 "$set": {
-                    "overall_scores.plagiarism": {
-                        "score": (
-                            round(total_similarity / question_count, 4)
-                            if question_count > 0
-                            else 0
-                        ),
+                    f"overall_scores.plagiarism": {
+                        "score": overall_plagiarism_score,
                         "evaluated_at": datetime.now(timezone.utc),
                     },
-                    "pdf_file": pdf_file,  # Keep this for reference
+                    "pdf_file_reference": pdf_file,
                 },
                 "$setOnInsert": {
-                    "questions": [
-                        {"question_number": i, "scores": {}}
-                        for i in range(1, len(self.teacher_questions) // 2 + 1)
-                    ]
+                    "course_id": self.course_id,
+                    "assignment_id": self.assignment_id,
+                    "submission_id": submission_id,
+                    "questions": [],
                 },
-            },
-            upsert=True,
-        )
+            }
+            operations.append(
+                UpdateOne(
+                    {
+                        "submission_id": submission_id,
+                        "course_id": self.course_id,
+                        "assignment_id": self.assignment_id,
+                    },
+                    update_doc,
+                    upsert=True,
+                )
+            )
 
-        # Execute question updates if any
-        if question_updates:
-            self.results_collection.bulk_write(question_updates)
+            for qs_mongo in question_scores_for_mongo:
+                operations.append(
+                    UpdateOne(
+                        {
+                            "submission_id": submission_id,
+                            "course_id": self.course_id,
+                            "assignment_id": self.assignment_id,
+                            "questions.question_number": qs_mongo["question_number"],
+                        },
+                        {
+                            "$set": {
+                                "questions.$.scores.plagiarism": qs_mongo["scores"][
+                                    "plagiarism"
+                                ]
+                            }
+                        },
+                    )
+                )
+                operations.append(
+                    UpdateOne(
+                        {
+                            "submission_id": submission_id,
+                            "course_id": self.course_id,
+                            "assignment_id": self.assignment_id,
+                            "questions.question_number": {
+                                "$ne": qs_mongo["question_number"]
+                            },
+                        },
+                        {
+                            "$addToSet": {
+                                "questions": {
+                                    "question_number": qs_mongo["question_number"],
+                                    "scores": {
+                                        "plagiarism": qs_mongo["scores"]["plagiarism"]
+                                    },
+                                }
+                            }
+                        },
+                    )
+                )
+
+        if operations:
+            try:
+                result = self.results_collection.bulk_write(operations, ordered=False)
+                logger.info(
+                    f"MongoDB bulk write for plagiarism: {result.bulk_api_result}"
+                )
+            except Exception as e:
+                logger.error(f"Error saving plagiarism to MongoDB: {str(e)}")
 
     def run(self, teacher_questions, questions_answers_by_pdf, submission_ids=None):
         self.teacher_questions = teacher_questions
         self.questions_answers_by_pdf = questions_answers_by_pdf
-
         if submission_ids:
             self.submission_ids = submission_ids
+        else:
+            self.submission_ids = list(questions_answers_by_pdf.keys())
 
-        # Compare answers between students
         self.compare_answers()
+        self.save_results_to_mongo()
 
-        # Prepare final results structure
-        final_results = {
-            "course_id": self.course_id,
-            "assignment_id": self.assignment_id,
-            "results": [],
-        }
-
-        # Include results for all PDFs
+        final_results_list = []
         pdf_files_list = list(self.questions_answers_by_pdf.keys())
-        for pdf_file in self.questions_answers_by_pdf:
-            qa_results = self.questions_answers_by_pdf.get(pdf_file, {})
-            similarity_data = self.similarity_results.get(pdf_file, {})
+
+        for pdf_idx, pdf_file in enumerate(pdf_files_list):
             submission_id = (
-                self.submission_ids[pdf_files_list.index(pdf_file)]
-                if self.submission_ids
+                self.submission_ids[pdf_idx]
+                if pdf_idx < len(self.submission_ids)
                 else pdf_file
             )
+            similarity_data = self.similarity_results.get(pdf_file, {})
 
-            question_results = {}
-            total_similarity = 0
-            question_count = 0
+            question_results_for_output = {}
+            valid_similarities_for_overall = []
 
-            for q_key in qa_results:
+            for q_key, data in similarity_data.items():
                 if q_key.startswith("Question#"):
-                    if q_key in similarity_data:
-                        max_similarity = similarity_data[q_key].get("max_similarity", 0)
-                        copied_sentence = similarity_data[q_key].get(
-                            "copied_sentence", ""
-                        )
+                    max_similarity = data.get("max_similarity", 0.0)
+                    copied_sentence = data.get("copied_sentence", "")
+                    compared_with_submission_id = data.get(
+                        "compared_with_submission_id"
+                    )
+                    question_results_for_output[q_key] = {
+                        "plagiarism_score": round(max_similarity, 4),
+                        "copied_sentence": copied_sentence,
+                        "compared_with_submission_id": compared_with_submission_id,
+                    }
+                    valid_similarities_for_overall.append(max_similarity)
 
-                        question_results[q_key] = {
-                            "plagiarism_score": round(max_similarity, 4),
-                            "copied_sentence": copied_sentence,
-                        }
+            overall_similarity = 0.0
+            if valid_similarities_for_overall:
+                overall_similarity = round(
+                    sum(valid_similarities_for_overall)
+                    / len(valid_similarities_for_overall),
+                    4,
+                )
 
-                        total_similarity += max_similarity
-                        question_count += 1
-
-            submission_result = {
-                "submission_id": submission_id,
-                "pdf_file": pdf_file,
-                "question_results": question_results,
-                "overall_similarity": (
-                    round(total_similarity / question_count, 4)
-                    if question_count > 0
-                    else 0
-                ),
-                "evaluated_at": datetime.now(timezone.utc),
-            }
-
-            final_results["results"].append(submission_result)
-
-            # Save to MongoDB
-            self.save_results_to_mongo(
-                submission_id,
+            final_results_list.append(
                 {
-                    "similarity_data": similarity_data,
-                    "pdf_file": pdf_file,
-                    "qa_results": qa_results,
-                },
+                    "submission_id": submission_id,
+                    "pdf_file_reference": pdf_file,
+                    "question_results": question_results_for_output,
+                    "overall_similarity": overall_similarity,
+                    "evaluated_at": datetime.now(timezone.utc).isoformat(),
+                }
             )
 
-        return final_results
+        return {
+            "course_id": self.course_id,
+            "assignment_id": self.assignment_id,
+            "results": final_results_list,
+        }
+
+
+if __name__ == "__main__":
+    teacher_q = {
+        "Question#1": "Explain photosynthesis.",
+        "Question#2": "What is gravity?",
+    }
+    student_answers = {
+        "studentA.pdf": {
+            "Question#1": "Photosynthesis is the process by which green plants use sunlight, water, and carbon dioxide to create their own food and release oxygen. It is a vital process for life on Earth.",
+            "Answer#1": "Photosynthesis is the process by which green plants use sunlight, water, and carbon dioxide to create their own food and release oxygen. It is a vital process for life on Earth.",
+            "Question#2": "Gravity is a force of attraction that exists between any two masses, any two bodies, any two particles.",
+            "Answer#2": "Gravity is a fundamental force of attraction that exists between any two objects with mass. The more mass an object has, the stronger its gravitational pull.",
+        },
+        "studentB.pdf": {
+            "Question#1": "Photosynthesis is how plants make food. They use sunlight and water. It is very important.",
+            "Answer#1": "Photosynthesis is how plants make food. They use sunlight and water. It is very important.",
+            "Question#2": "Gravity is what keeps us on the ground. It pulls things down.",
+            "Answer#2": "Gravity is what keeps us on the ground. It pulls things down. Without it we would float away.",
+        },
+        "studentC.pdf": {
+            "Question#1": "Photosynthesis is the process by which green plants use sunlight, water, and carbon dioxide to create their own food and release oxygen. It is a vital process for life on Earth.",  # Identical to A
+            "Answer#1": "Photosynthesis is the process by which green plants use sunlight, water, and carbon dioxide to create their own food and release oxygen. It is a vital process for life on Earth.",
+            "Question#2": "Gravity is a force of attraction. It makes apples fall from trees.",
+            "Answer#2": "Gravity is a force of attraction. It makes apples fall from trees. Newton discovered it.",
+        },
+    }
+    submission_ids_main = ["studA_id", "studB_id", "studC_id"]
+
+    checker = PlagiarismChecker(
+        course_id=101, assignment_id=202, submission_ids=submission_ids_main
+    )
+    plagiarism_results = checker.run(teacher_q, student_answers)
+    import json
+
+    print(json.dumps(plagiarism_results, indent=2))
