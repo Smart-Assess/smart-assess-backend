@@ -19,7 +19,7 @@ from utils.s3 import upload_to_s3, delete_from_s3
 from utils.security import get_password_hash
 
 from fastapi import HTTPException
-from utils.smtp import send_email  
+from utils.smtp import send_email
 import os
 import pandas as pd
 import io
@@ -49,22 +49,22 @@ async def add_student(
         raise HTTPException(
             status_code=400, detail="Student with this email already exists"
         )
-    
+
     # Generate department code (first letter of each word)
     dept_words = department.strip().split()
-    dept_code = ''.join([word[0].upper() for word in dept_words if word])
-    
+    dept_code = "".join([word[0].upper() for word in dept_words if word])
+
     # Generate a random 3-digit number
     random_digits = f"{random.randint(0, 999):03d}"
-    
+
     # Create student_id in format: batchvalue-random3digits-department_code
     student_id = f"{batch}-{random_digits}-{dept_code}"
-    
+
     # Check if this student_id already exists, if so, regenerate
     while db.query(Student).filter(Student.student_id == student_id).first():
         random_digits = f"{random.randint(0, 999):03d}"
         student_id = f"{batch}-{random_digits}-{dept_code}"
-    
+
     image_url = None
     if image:
         image_path = os.path.join("temp", image.filename)
@@ -92,7 +92,7 @@ async def add_student(
         password=get_password_hash(password),  # Hash the password
         university_id=current_admin.university_id,  # Set university_id from the admin's associated university
     )
-    send_email(email,"",password,"student")
+    send_email(email, "", password, "student")
     # Add the new student to the session and commit
     db.add(new_student)
     db.commit()
@@ -104,6 +104,7 @@ async def add_student(
         "student_id": new_student.id,
         "generated_student_id": student_id,
     }
+
 
 @router.get("/universityadmin/students", response_model=dict)
 async def get_students(
@@ -235,35 +236,35 @@ async def update_student(
 
     if full_name:
         student.full_name = full_name
-        
+
     should_regenerate_id = False
-    
+
     if department:
         student.department = department
         should_regenerate_id = True
-        
+
     if batch:
         student.batch = batch
         should_regenerate_id = True
-        
+
     # Regenerate student_id if needed
     if should_regenerate_id:
         dept_words = student.department.strip().split()
-        dept_code = ''.join([word[0].upper() for word in dept_words if word])
-        
+        dept_code = "".join([word[0].upper() for word in dept_words if word])
+
         random_digits = f"{random.randint(0, 999):03d}"
-        
+
         new_student_id = f"{student.batch}-{random_digits}-{dept_code}"
-        
+
         while db.query(Student).filter(Student.student_id == new_student_id).first():
             random_digits = f"{random.randint(0, 999):03d}"
             new_student_id = f"{student.batch}-{random_digits}-{dept_code}"
-            
+
         student.student_id = new_student_id
-    
+
     if section:
         student.section = section
-        
+
     if password:
         student.password = get_password_hash(password)
 
@@ -343,12 +344,12 @@ async def add_teacher(
         )
 
     dept_words = department.strip().split()
-    dept_code = ''.join([word[0].upper() for word in dept_words if word])
-    
+    dept_code = "".join([word[0].upper() for word in dept_words if word])
+
     random_digits = f"{random.randint(0, 999):03d}"
-    
+
     teacher_id = f"{dept_code}-{random_digits}"
-    
+
     while db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first():
         random_digits = f"{random.randint(0, 999):03d}"
         teacher_id = f"{dept_code}-{random_digits}"
@@ -377,7 +378,7 @@ async def add_teacher(
         image_url=image_url,
         university_id=current_admin.university_id,
     )
-    send_email(email,"",password,"teacher")
+    send_email(email, "", password, "teacher")
 
     db.add(new_teacher)
     db.commit()
@@ -386,7 +387,7 @@ async def add_teacher(
     return {
         "success": True,
         "status": 201,
-        "teacher_id": teacher_id,  
+        "teacher_id": teacher_id,
     }
 
 
@@ -477,7 +478,7 @@ async def update_teacher(
 
     if should_regenerate_id:
         dept_words = teacher.department.strip().split()
-        dept_code = ''.join([word[0].upper() for word in dept_words if word])
+        dept_code = "".join([word[0].upper() for word in dept_words if word])
 
         random_digits = f"{random.randint(0, 999):03d}"
 
@@ -616,109 +617,118 @@ async def bulk_import_students(
     file_size = 0
     contents = await file.read()
     file_size = len(contents)
-    
+
     if file_size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"File size exceeds the limit of {MAX_FILE_SIZE/1024/1024}MB"
+            detail=f"File size exceeds the limit of {MAX_FILE_SIZE/1024/1024}MB",
         )
-        
+
     # Check file extension
     filename = file.filename.lower()
-    if not (filename.endswith('.xlsx') or filename.endswith('.csv')):
+    if not (filename.endswith(".xlsx") or filename.endswith(".csv")):
         raise HTTPException(
-            status_code=400,
-            detail="Only CSV and Excel files are supported"
+            status_code=400, detail="Only CSV and Excel files are supported"
         )
-    
+
     # Parse file content
     try:
-        if filename.endswith('.csv'):
+        if filename.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(contents))
         else:  # Excel file
             df = pd.read_excel(io.BytesIO(contents))
     except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to parse file: {str(e)}"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
+
     # Validate required columns
-    required_columns = ['full_name', 'department', 'email', 'batch', 'section', 'password']
+    required_columns = [
+        "full_name",
+        "department",
+        "email",
+        "batch",
+        "section",
+        "password",
+    ]
     missing_columns = [col for col in required_columns if col not in df.columns]
-    
+
     if missing_columns:
         raise HTTPException(
             status_code=400,
-            detail=f"Missing required columns: {', '.join(missing_columns)}"
+            detail=f"Missing required columns: {', '.join(missing_columns)}",
         )
-    
+
     # Process each row
     success_count = 0
     error_records = []
-    
+
     for index, row in df.iterrows():
         try:
             # Validate email is not already used
-            existing_student = db.query(Student).filter(Student.email == row['email']).first()
+            existing_student = (
+                db.query(Student).filter(Student.email == row["email"]).first()
+            )
             if existing_student:
-                error_records.append({
-                    "row": index + 2,  # +2 because index starts at 0 and spreadsheets at 1, with header row
-                    "email": row['email'],
-                    "error": "Email already exists"
-                })
+                error_records.append(
+                    {
+                        "row": index
+                        + 2,  # +2 because index starts at 0 and spreadsheets at 1, with header row
+                        "email": row["email"],
+                        "error": "Email already exists",
+                    }
+                )
                 continue
-                
+
             # Generate student_id
-            dept_words = row['department'].strip().split()
-            dept_code = ''.join([word[0].upper() for word in dept_words if word])
+            dept_words = row["department"].strip().split()
+            dept_code = "".join([word[0].upper() for word in dept_words if word])
             random_digits = f"{random.randint(0, 999):03d}"
             student_id = f"{row['batch']}-{random_digits}-{dept_code}"
-            
+
             # Ensure unique student_id
             while db.query(Student).filter(Student.student_id == student_id).first():
                 random_digits = f"{random.randint(0, 999):03d}"
                 student_id = f"{row['batch']}-{random_digits}-{dept_code}"
-            
+
             # Create new student
             new_student = Student(
-                full_name=row['full_name'],
+                full_name=row["full_name"],
                 student_id=student_id,
-                department=row['department'],
-                email=row['email'],
-                batch=row['batch'],
-                section=row['section'],
+                department=row["department"],
+                email=row["email"],
+                batch=row["batch"],
+                section=row["section"],
                 image_url=None,
-                password=get_password_hash(row['password']),
+                password=get_password_hash(row["password"]),
                 university_id=current_admin.university_id,
             )
-            
+
             # Send welcome email
             try:
-                send_email(row['email'], "", row['password'], "student")
+                send_email(row["email"], "", row["password"], "student")
             except Exception as email_error:
                 print(f"Failed to send email to {row['email']}: {str(email_error)}")
-            
+
             db.add(new_student)
             success_count += 1
-            
+
         except Exception as e:
-            error_records.append({
-                "row": index + 2,
-                "email": row.get('email', 'Unknown'),
-                "error": str(e)
-            })
-    
+            error_records.append(
+                {
+                    "row": index + 2,
+                    "email": row.get("email", "Unknown"),
+                    "error": str(e),
+                }
+            )
+
     # Commit successful records
     try:
         db.commit()
     except Exception as commit_error:
         db.rollback()
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save records: {str(commit_error)}"
+            status_code=500, detail=f"Failed to save records: {str(commit_error)}"
         )
-    
+
     return {
         "success": True,
         "status": 200,
@@ -726,8 +736,9 @@ async def bulk_import_students(
         "total_records": len(df),
         "successful_imports": success_count,
         "failed_imports": len(error_records),
-        "errors": error_records
+        "errors": error_records,
     }
+
 
 @router.post("/universityadmin/teachers/bulk-import", response_model=dict)
 async def bulk_import_teachers(
@@ -744,107 +755,108 @@ async def bulk_import_teachers(
     file_size = 0
     contents = await file.read()
     file_size = len(contents)
-    
+
     if file_size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"File size exceeds the limit of {MAX_FILE_SIZE/1024/1024}MB"
+            detail=f"File size exceeds the limit of {MAX_FILE_SIZE/1024/1024}MB",
         )
-        
+
     # Check file extension
     filename = file.filename.lower()
-    if not (filename.endswith('.xlsx') or filename.endswith('.csv')):
+    if not (filename.endswith(".xlsx") or filename.endswith(".csv")):
         raise HTTPException(
-            status_code=400,
-            detail="Only CSV and Excel files are supported"
+            status_code=400, detail="Only CSV and Excel files are supported"
         )
-    
+
     # Parse file content
     try:
-        if filename.endswith('.csv'):
+        if filename.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(contents))
         else:  # Excel file
             df = pd.read_excel(io.BytesIO(contents))
     except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to parse file: {str(e)}"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
+
     # Validate required columns
-    required_columns = ['full_name', 'department', 'email', 'password']
+    required_columns = ["full_name", "department", "email", "password"]
     missing_columns = [col for col in required_columns if col not in df.columns]
-    
+
     if missing_columns:
         raise HTTPException(
             status_code=400,
-            detail=f"Missing required columns: {', '.join(missing_columns)}"
+            detail=f"Missing required columns: {', '.join(missing_columns)}",
         )
-    
+
     # Process each row
     success_count = 0
     error_records = []
-    
+
     for index, row in df.iterrows():
         try:
             # Validate email is not already used
-            existing_teacher = db.query(Teacher).filter(Teacher.email == row['email']).first()
+            existing_teacher = (
+                db.query(Teacher).filter(Teacher.email == row["email"]).first()
+            )
             if existing_teacher:
-                error_records.append({
-                    "row": index + 2,
-                    "email": row['email'],
-                    "error": "Email already exists"
-                })
+                error_records.append(
+                    {
+                        "row": index + 2,
+                        "email": row["email"],
+                        "error": "Email already exists",
+                    }
+                )
                 continue
-                
+
             # Generate teacher_id
-            dept_words = row['department'].strip().split()
-            dept_code = ''.join([word[0].upper() for word in dept_words if word])
+            dept_words = row["department"].strip().split()
+            dept_code = "".join([word[0].upper() for word in dept_words if word])
             random_digits = f"{random.randint(0, 999):03d}"
             teacher_id = f"{dept_code}-{random_digits}"
-            
+
             # Ensure unique teacher_id
             while db.query(Teacher).filter(Teacher.teacher_id == teacher_id).first():
                 random_digits = f"{random.randint(0, 999):03d}"
                 teacher_id = f"{dept_code}-{random_digits}"
-            
+
             # Create new teacher
             new_teacher = Teacher(
-                full_name=row['full_name'],
+                full_name=row["full_name"],
                 teacher_id=teacher_id,
-                department=row['department'],
-                email=row['email'],
-                password=get_password_hash(row['password']),
+                department=row["department"],
+                email=row["email"],
+                password=get_password_hash(row["password"]),
                 image_url=None,
                 university_id=current_admin.university_id,
             )
-            
+
             # Send welcome email
             try:
-                send_email(row['email'], "", row['password'], "teacher")
+                send_email(row["email"], "", row["password"], "teacher")
             except Exception as email_error:
                 print(f"Failed to send email to {row['email']}: {str(email_error)}")
-            
+
             db.add(new_teacher)
             success_count += 1
-            
+
         except Exception as e:
-            error_records.append({
-                "row": index + 2,
-                "email": row.get('email', 'Unknown'),
-                "error": str(e)
-            })
-    
+            error_records.append(
+                {
+                    "row": index + 2,
+                    "email": row.get("email", "Unknown"),
+                    "error": str(e),
+                }
+            )
+
     # Commit successful records
     try:
         db.commit()
     except Exception as commit_error:
         db.rollback()
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save records: {str(commit_error)}"
+            status_code=500, detail=f"Failed to save records: {str(commit_error)}"
         )
-    
+
     return {
         "success": True,
         "status": 200,
@@ -852,5 +864,5 @@ async def bulk_import_teachers(
         "total_records": len(df),
         "successful_imports": success_count,
         "failed_imports": len(error_records),
-        "errors": error_records
+        "errors": error_records,
     }

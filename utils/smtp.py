@@ -2,18 +2,19 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+
 def send_email(recipient_email, username, password, user_type="admin"):
     smtp_server = "smtp.gmail.com"  # Change this to your SMTP server
     smtp_port = 587  # Change if needed
     sender_email = "smartassessXXXXX"  # Change to your email
     sender_password = "XXXX"  # Change to your email password
-    
+
     subject_mapping = {
         "admin": "University Registration Successful",
         "student": "Student Registration Successful",
-        "teacher": "Teacher Registration Successful"
+        "teacher": "Teacher Registration Successful",
     }
-    
+
     body_mapping = {
         "admin": f"""
         Dear University Admin,
@@ -54,28 +55,28 @@ def send_email(recipient_email, username, password, user_type="admin"):
         
         Best Regards,
         Your University Team
-        """
+        """,
     }
-    
+
     subject = subject_mapping.get(user_type, "Account Registration Successful")
     body = body_mapping.get(user_type, "")
-    
+
     try:
         # Connect to the SMTP server
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
         server.login(sender_email, sender_password)
-        
+
         # Prepare email
         msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = recipient_email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
-        
+        msg["From"] = sender_email
+        msg["To"] = recipient_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
         # Send email
         server.sendmail(sender_email, recipient_email, msg.as_string())
-        
+
         server.quit()
         print("Email sent successfully!")
     except Exception as e:

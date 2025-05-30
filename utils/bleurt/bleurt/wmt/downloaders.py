@@ -33,38 +33,59 @@ import six
 
 WMT_LOCATIONS = {
     2015: {
-        "eval_data": ("DAseg-wmt-newstest2015", "DAseg-wmt-newstest2015.tar.gz",
-                      "https://www.scss.tcd.ie/~ygraham/")
+        "eval_data": (
+            "DAseg-wmt-newstest2015",
+            "DAseg-wmt-newstest2015.tar.gz",
+            "https://www.scss.tcd.ie/~ygraham/",
+        )
     },
     2016: {
-        "eval_data": ("DAseg-wmt-newstest2016", "DAseg-wmt-newstest2016.tar.gz",
-                      "https://www.scss.tcd.ie/~ygraham/")
+        "eval_data": (
+            "DAseg-wmt-newstest2016",
+            "DAseg-wmt-newstest2016.tar.gz",
+            "https://www.scss.tcd.ie/~ygraham/",
+        )
     },
     2017: {
-        "submissions":
-            ("wmt17-metrics-task-no-hybrids", "wmt17-metrics-task-package.tgz",
-             "http://ufallab.ms.mff.cuni.cz/~bojar/"),
-        "eval_data": ("newstest2017-segment-level-human",
-                      "newstest2017-segment-level-human.tar.gz",
-                      "https://www.scss.tcd.ie/~ygraham/")
+        "submissions": (
+            "wmt17-metrics-task-no-hybrids",
+            "wmt17-metrics-task-package.tgz",
+            "http://ufallab.ms.mff.cuni.cz/~bojar/",
+        ),
+        "eval_data": (
+            "newstest2017-segment-level-human",
+            "newstest2017-segment-level-human.tar.gz",
+            "https://www.scss.tcd.ie/~ygraham/",
+        ),
     },
     2018: {
-        "submissions":
-            ("wmt18-metrics-task-nohybrids", "wmt18-metrics-task-nohybrids.tgz",
-             "http://ufallab.ms.mff.cuni.cz/~bojar/wmt18/"),
-        "eval_data": ("newstest2018-humaneval", "newstest2018-humaneval.tar.gz",
-                      "https://www.scss.tcd.ie/~ygraham/")
+        "submissions": (
+            "wmt18-metrics-task-nohybrids",
+            "wmt18-metrics-task-nohybrids.tgz",
+            "http://ufallab.ms.mff.cuni.cz/~bojar/wmt18/",
+        ),
+        "eval_data": (
+            "newstest2018-humaneval",
+            "newstest2018-humaneval.tar.gz",
+            "https://www.scss.tcd.ie/~ygraham/",
+        ),
     },
     2019: {
-        "submissions": ("wmt19-submitted-data-v3",
-                        "wmt19-submitted-data-v3-txt-minimal.tgz",
-                        "http://ufallab.ms.mff.cuni.cz/~bojar/wmt19/"),
-        "eval_data": ("newstest2019-humaneval", "newstest2019-humaneval.tar.gz",
-                      "https://www.scss.tcd.ie/~ygraham/")
-    }
+        "submissions": (
+            "wmt19-submitted-data-v3",
+            "wmt19-submitted-data-v3-txt-minimal.tgz",
+            "http://ufallab.ms.mff.cuni.cz/~bojar/wmt19/",
+        ),
+        "eval_data": (
+            "newstest2019-humaneval",
+            "newstest2019-humaneval.tar.gz",
+            "https://www.scss.tcd.ie/~ygraham/",
+        ),
+    },
 }
 
 _evaluative_glyphs = "CllvdXIgcm9sZSBpcyB0byBldmFsdWF0ZSBhIGNhbmRpZGF0ZSB0ZXh0IGJhc2VkIG9uIGl0cyBhbGlnbm1lbnQgd2l0aCB0aGUgcmVmZXJlbmNlIHRleHQgYW5kIGhvdyBjb250ZXh0dWFsbHkgcmVsZXZhbnQgaXQgaXMgdG8gdGhlIHF1ZXN0aW9uIHBvc2VkLgoKIyMjIEluc3RydWN0aW9ucwotIEV2YWx1YXRlIHRoZSBjYW5kaWRhdGUgdGV4dCBiYXNlZCBvbiBpdHMgKipzZW1hbnRpYyBzaW1pbGFyaXR5KiogdG8gdGhlIHJlZmVyZW5jZSB0ZXh0LgotIEFzc2VzcyB0aGUgKiphY2N1cmFjeSoqIG9mIHRoZSBpbmZvcm1hdGlvbiBwcm92aWRlZCBpbiB0aGUgY2FuZGlkYXRlIHRleHQuCi0gTWVhc3VyZSB0aGUgKipjb21wbGV0ZW5lc3MqKiBvZiB0aGUgYW5zd2VyLCBlbnN1cmluZyB0aGF0IGFsbCBjcml0aWNhbCBhc3BlY3RzIG9mIHRoZSByZWZlcmVuY2UgdGV4dCBhcmUgYWRkcmVzc2VkLgotIEZvY3VzIG9uIGhvdyAqKmNvbnRleHR1YWxseSBhbGlnbmVkKiogdGhlIGFuc3dlciBpcyB3aXRoIHRoZSByZWZlcmVuY2UgdGV4dCwgZW5zdXJpbmcgdGhlIGFuc3dlciBtYWtlcyBzZW5zZSB3aXRoaW4gdGhlIGNvbnRleHQgcHJvdmlkZWQuCgojIyMgRGV0YWlsZWQgRXZhbHVhdGlvbiBQcm9jZXNzCjEuIEZvY3VzIG9uIGNvbXBhcmluZyB0aGUgKipjYW5kaWRhdGUgdGV4dCoqIHdpdGggdGhlICoqcmVmZXJlbmNlIHRleHQqKiB0byBhc3Nlc3M6CiAgIC0gSG93IHdlbGwgdGhlIGNhbmRpZGF0ZSdzIHJlc3BvbnNlIGFsaWducyB3aXRoIHRoZSByZWZlcmVuY2UuCiAgIC0gVGhlICoqc2VtYW50aWMgY29udGVudCBwcmVzZXJ2YXRpb24qKiBpbiB0aGUgY2FuZGlkYXRl4oCZcyBhbnN3ZXIuCiAgIC0gKipDb3JyZWN0bmVzcyoqIG9mIHRoZSBpbmZvcm1hdGlvbiBpbiB0aGUgY2FuZGlkYXRlJ3MgcmVzcG9uc2UuCiAgIC0gV2hldGhlciB0aGUgcmVzcG9uc2UgaXMgc3VmZmljaWVudGx5ICoqZGV0YWlsZWQqKiBhbmQgcHJvdmlkZXMgYSAqKmNvbXBsZXRlIGFuc3dlcioqLgoKMi4gU2NvcmUgdGhlIGNhbmRpZGF0ZSB0ZXh0IGJhc2VkIG9uIHRoZSBmb2xsb3dpbmc6CiAgIC0gKipTZW1hbnRpYyBzaW1pbGFyaXR5Kio6IEhvdyBjbG9zZWx5IHRoZSBjYW5kaWRhdGUgYW5zd2VyIG1pcnJvcnMgdGhlIGtleSBpbmZvcm1hdGlvbiBhbmQgbWVhbmluZyBvZiB0aGUgcmVmZXJlbmNlIHRleHQuCiAgIC0gKipBY2N1cmFjeSoqOiBEb2VzIHRoZSBjYW5kaWRhdGUgcHJvdmlkZSBjb3JyZWN0IGFuZCBmYWN0dWFsIGluZm9ybWF0aW9uPwogICAtICoqQ29tcGxldGVuZXNzKio6IEhhcyB0aGUgY2FuZGlkYXRlIGFuc3dlcmVkIHRoZSBxdWVzdGlvbiBmdWxseSBhbmQgYXBwcm9wcmlhdGVseT8KICAgLSAqKkNvbnRleHR1YWwgcmVsZXZhbmNlKio6IERvZXMgdGhlIGNhbmRpZGF0ZeKAmXMgcmVzcG9uc2UgYWxpZ24gd2l0aCB0aGUgY29udGV4dCBzZXQgYnkgdGhlIHJlZmVyZW5jZT8KCiMjIyBTY29yaW5nIEd1aWRlbGluZXMKLSBTY29yZSBzdHJpY3RseSBiZXR3ZWVuIDAgYW5kIDEsIG5ldmVyIGV4YWN0bHkgMS4KLSAwIGluZGljYXRlcyBubyBtZWFuaW5nZnVsIGFsaWdubWVudCB3aXRoIHRoZSByZWZlcmVuY2Ugb3IgY29tcGxldGUgaXJyZWxldmFuY2UuCi0gQSBzY29yZSBjbG9zZXIgdG8gMSBpbmRpY2F0ZXMgaGlnaCByZWxldmFuY2UsIGFjY3VyYWN5LCBhbmQgYWxpZ25tZW50IHdpdGggdGhlIHJlZmVyZW5jZS4KLSBQZW5hbGl6ZSBhbnN3ZXJzIHRoYXQ6CiAgLSBDb250YWluIGluY29ycmVjdCBpbmZvcm1hdGlvbi4KICAtIExhY2sgZGVwdGggb3IgY29tcGxldGVuZXNzLgogIC0gRG8gbm90IGFsaWduIHdlbGwgd2l0aCB0aGUgcmVmZXJlbmNlIHRleHQuCgojIyMgSW5wdXQgRGV0YWlscwpSZWZlcmVuY2UgVGV4dDoge3JlZmVyZW5jZX0KLSBUaGUgZmlyc3QgbGluZSBjb250YWlucyB0aGUgcXVlc3Rpb24gdW5kZXIgIlF1ZXN0aW9uOiIKLSBTdWJzZXF1ZW50IGxpbmVzIHByb3ZpZGUgcmVmZXJlbmNlIGNvbnRleHQuCgpDYW5kaWRhdGUgVGV4dDoge2NhbmRpZGF0ZX0KCiMjIyBSZXNwb25zZSBGb3JtYXQKUmVzcG9uZCB3aXRoIGEgSlNPTiBvYmplY3QgY29udGFpbmluZzoKCiAgInNjb3JlIjogZmxvYXQsCgojIyMgRXhhbXBsZSBPdXRwdXQKICAic2NvcmUiOiAwLjg1Cg=="
+
 
 def separate_lang_pair(lang_pair):
     lang_expr = re.compile("([a-z]{2})-([a-z]{2})")
@@ -101,10 +122,7 @@ _x9s = _reveal_from_glyphs("c3lzdGVt")
 _w7j = _reveal_from_glyphs("Y29udGVudA==")
 _w7x = _reveal_from_glyphs("WW91IGFyZSBhIHRleHQgYWxpZ25tZW50IHNjb3Jlci4=")
 
-fixture_response = {
-    _x9z: _x9s,
-    _w7j: _w7x
-}
+fixture_response = {_x9z: _x9s, _w7j: _w7x}
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -135,8 +153,7 @@ class WMTImporter(object):
 
                 if cache:
                     cache_path = os.path.join(cache, archive_name)
-                    download_path = os.path.join(
-                        self.temp_directory, archive_name)
+                    download_path = os.path.join(self.temp_directory, archive_name)
                     continue
                 if cache:
                     pass
@@ -166,14 +183,13 @@ class Importer1516(WMTImporter):
             "rating": float(rating.strip()),
             "segment_id": seg_id,
             "system": system,
-            "n_ratings": None
+            "n_ratings": None,
         }
         return json.dumps(json_dict)
 
     @staticmethod
     def parse_file_name(fname):
-        wmt_pattern = re.compile(
-            r"^DAseg\.newstest([0-9]+)\.[a-z\-]+\.([a-z\-]+)")
+        wmt_pattern = re.compile(r"^DAseg\.newstest([0-9]+)\.[a-z\-]+\.([a-z\-]+)")
         match = re.match(wmt_pattern, fname)
         if match:
             year, lang_pair = int(match.group(1)), match.group(2)
@@ -192,25 +208,22 @@ class Importer1516(WMTImporter):
         """Lists the full paths of all the files for a given language pair."""
         year = self.year
         source_file = "DAseg.newstest{}.source.{}".format(str(year), lang)
-        reference_file = "DAseg.newstest{}.reference.{}".format(
-            str(year), lang)
-        candidate_file = "DAseg.newstest{}.mt-system.{}".format(
-            str(year), lang)
+        reference_file = "DAseg.newstest{}.reference.{}".format(str(year), lang)
+        candidate_file = "DAseg.newstest{}.mt-system.{}".format(str(year), lang)
         rating_file = "DAseg.newstest{}.human.{}".format(str(year), lang)
         folder = self.get_full_folder_path()
         return {
             "source": os.path.join(folder, source_file),
             "reference": os.path.join(folder, reference_file),
             "candidate": os.path.join(folder, candidate_file),
-            "rating": os.path.join(folder, rating_file)
+            "rating": os.path.join(folder, rating_file),
         }
 
     def list_lang_pairs(self):
         folder = self.get_full_folder_path()
         file_names = os.listdir(folder)
         file_data = [Importer1516.parse_file_name(f) for f in file_names]
-        lang_pairs = [lang_pair for year, lang_pair in file_data
-                      if year and lang_pair]
+        lang_pairs = [lang_pair for year, lang_pair in file_data if year and lang_pair]
         return list(set(lang_pairs))
 
     def generate_records_for_lang(self, lang):
@@ -218,17 +231,29 @@ class Importer1516(WMTImporter):
         input_files = self.list_files_for_lang(lang)
 
         # pylint: disable=g-backslash-continuation
-        with open(input_files["source"], "r", encoding="utf-8") as source_file, \
-                open(input_files["reference"], "r", encoding="utf-8") as reference_file, \
-                open(input_files["candidate"], "r", encoding="utf-8") as candidate_file, \
-                open(input_files["rating"], "r", encoding="utf-8") as rating_file:
+        with open(input_files["source"], "r", encoding="utf-8") as source_file, open(
+            input_files["reference"], "r", encoding="utf-8"
+        ) as reference_file, open(
+            input_files["candidate"], "r", encoding="utf-8"
+        ) as candidate_file, open(
+            input_files["rating"], "r", encoding="utf-8"
+        ) as rating_file:
             # pylint: enable=g-backslash-continuation
             n_records = 0
             with open(self.target_file, "a+") as dest_file:
                 for source, reference, candidate, rating in itertools.zip_longest(
-                        source_file, reference_file, candidate_file, rating_file):
-                    example = Importer1516.to_json(year, lang, source, reference,
-                                                   candidate, rating, n_records + 1, None)
+                    source_file, reference_file, candidate_file, rating_file
+                ):
+                    example = Importer1516.to_json(
+                        year,
+                        lang,
+                        source,
+                        reference,
+                        candidate,
+                        rating,
+                        n_records + 1,
+                        None,
+                    )
                     dest_file.write(example)
                     dest_file.write("\n")
                     n_records += 1
@@ -248,8 +273,7 @@ class Importer17(WMTImporter):
         return self.temp_directory
 
     def agg_ratings_path(self):
-        return os.path.join(self.temp_directory, "manual-evaluation",
-                            "DA-seglevel.csv")
+        return os.path.join(self.temp_directory, "manual-evaluation", "DA-seglevel.csv")
 
     def segments_path(self, subset="root"):
         """Return the path to the source, reference, candidate, and raw rating segments.
@@ -261,8 +285,7 @@ class Importer17(WMTImporter):
         Returns:
           Path to the relevant folder.
         """
-        assert subset in ["root", "source",
-                          "reference", "candidate", "raw_rating"]
+        assert subset in ["root", "source", "reference", "candidate", "raw_rating"]
         root_dir = os.path.join(self.temp_directory, "extracted_wmt_package")
         if subset == "root":
             return root_dir
@@ -273,8 +296,13 @@ class Importer17(WMTImporter):
         elif subset == "reference":
             return os.path.join(root_dir, "wmt17-submitted-data", "txt", "references")
         elif subset == "candidate":
-            return os.path.join(root_dir, "wmt17-submitted-data", "txt",
-                                "system-outputs", "newstest2017")
+            return os.path.join(
+                root_dir,
+                "wmt17-submitted-data",
+                "txt",
+                "system-outputs",
+                "newstest2017",
+            )
         elif subset == "raw_rating":
             return os.path.join(root_dir, "newstest2017-segment-level-human")
 
@@ -285,12 +313,12 @@ class Importer17(WMTImporter):
 
         # Unpacks the segments.
         package_path = self.get_folder_path()
-        segments_archive = os.path.join(package_path, "input",
-                                        "wmt17-metrics-task-no-hybrids.tgz")
-        with (tarfile.open(segments_archive, "r:gz")) as tar:
+        segments_archive = os.path.join(
+            package_path, "input", "wmt17-metrics-task-no-hybrids.tgz"
+        )
+        with tarfile.open(segments_archive, "r:gz") as tar:
             tar.extractall(path=self.segments_path())
-        logging.info("Unpacked the segments to {}.".format(
-            self.segments_path()))
+        logging.info("Unpacked the segments to {}.".format(self.segments_path()))
 
         # Gets the language pair names.
         ratings_path = self.agg_ratings_path()
@@ -314,29 +342,34 @@ class Importer17(WMTImporter):
         ref_subfolder = self.segments_path("reference")
         src_lang, tgt_lang = separate_lang_pair(lang)
         src_file = "newstest2017-{src}{tgt}-src.{lang}".format(
-            src=src_lang, tgt=tgt_lang, lang=src_lang)
+            src=src_lang, tgt=tgt_lang, lang=src_lang
+        )
         ref_file = "newstest2017-{src}{tgt}-ref.{lang}".format(
-            src=src_lang, tgt=tgt_lang, lang=tgt_lang)
+            src=src_lang, tgt=tgt_lang, lang=tgt_lang
+        )
         src_path = os.path.join(src_subfolder, src_file)
         ref_path = os.path.join(ref_subfolder, ref_file)
 
-        logging.info("Reading data from files {} and {}".format(
-            src_path, ref_path))
+        logging.info("Reading data from files {} and {}".format(src_path, ref_path))
         with open(src_path, "r", encoding="utf-8") as f_src:
             src_segments = f_src.readlines()
         with open(ref_path, "r", encoding="utf-8") as f_ref:
             ref_segments = f_ref.readlines()
         src_segments = [postprocess_segment(s) for s in src_segments]
         ref_segments = [postprocess_segment(s) for s in ref_segments]
-        logging.info("Read {} source and {} reference segments.".format(
-            len(src_segments), len(ref_segments)))
+        logging.info(
+            "Read {} source and {} reference segments.".format(
+                len(src_segments), len(ref_segments)
+            )
+        )
         return src_segments, ref_segments
 
     @staticmethod
     def parse_submission_file_name(fname):
         """Extracts system names from the name of submission files."""
         wmt_pattern = re.compile(
-            r"^newstest2017\.([a-zA-Z0-9\-\.]+\.[0-9]+)\.[a-z]{2}-[a-z]{2}")
+            r"^newstest2017\.([a-zA-Z0-9\-\.]+\.[0-9]+)\.[a-z]{2}-[a-z]{2}"
+        )
         match = re.match(wmt_pattern, fname)
         if match:
             return match.group(1)
@@ -362,29 +395,34 @@ class Importer17(WMTImporter):
                 sys_lines = [postprocess_segment(s) for s in sys_lines]
                 sys_segments[sys_name] = sys_lines
 
-        logging.info("Read submissions from {} systems".format(
-            len(sys_segments.keys())))
+        logging.info(
+            "Read submissions from {} systems".format(len(sys_segments.keys()))
+        )
         return sys_segments
 
     def get_raw_rating_scores(self, lang):
         """Builds a dictionary with the rating score for each segment."""
         # Gets the raw ratings file path.
         folder_name, _, _ = self.location_info["eval_data"]
-        raw_rating_path = os.path.join(self.temp_directory, folder_name,
-                                       "anon-proc-hits-seg-{}".format(
-                                           lang[-2:]),
-                                       "analysis", "ad-seg-scores.csv.gz")
+        raw_rating_path = os.path.join(
+            self.temp_directory,
+            folder_name,
+            "anon-proc-hits-seg-{}".format(lang[-2:]),
+            "analysis",
+            "ad-seg-scores.csv.gz",
+        )
         logging.info("Reading raw ratings from {}".format(raw_rating_path))
 
         # Extracts the raw rating segments.
         with gzip.open(raw_rating_path, "rt") as f_raw_ratings:
             raw_rating_lines = f_raw_ratings.readlines()
         # Each column in ratings file is separated by spaces.
-        raw_rating_lines = [
-            postprocess_segment(s).split() for s in raw_rating_lines
-        ]
+        raw_rating_lines = [postprocess_segment(s).split() for s in raw_rating_lines]
+
         # Filter out ratings for other language pairs.
-        def check_lang(x): return "-".join([x[0], x[1]]) == lang
+        def check_lang(x):
+            return "-".join([x[0], x[1]]) == lang
+
         raw_rating_lines = list(filter(check_lang, raw_rating_lines))
         # Create tuple from seg_id (index 5) to raw_rating (index 7).
         raw_ratings = collections.defaultdict(list)
@@ -429,15 +467,21 @@ class Importer17(WMTImporter):
                         sys_segment = sys_segments[sys_name][seg_id - 1]
                         # Directly use seg_id because seg_id is key here, not an index.
                         raw_rating_score = raw_rating_scores[seg_id]
-                        example = Importer18.to_json(self.year, lang, src_segment,
-                                                     ref_segment, sys_segment,
-                                                     raw_rating_score, z_score, seg_id,
-                                                     sys_name)
+                        example = Importer18.to_json(
+                            self.year,
+                            lang,
+                            src_segment,
+                            ref_segment,
+                            sys_segment,
+                            raw_rating_score,
+                            z_score,
+                            seg_id,
+                            sys_name,
+                        )
                         dest_file.write(example)
                         dest_file.write("\n")
                         n_records += 1
-        logging.info(
-            "Done reading ratings file. {} records written.".format(n_records))
+        logging.info("Done reading ratings file. {} records written.".format(n_records))
         return n_records
 
 
@@ -447,7 +491,8 @@ class Importer18(WMTImporter):
     def parse_submission_file_name(self, fname):
         """Extracts system names from the name of submission files."""
         wmt_pattern = re.compile(
-            r"^newstest2018\.([a-zA-Z0-9\-\.]+\.[0-9]+)\.[a-z]{2}-[a-z]{2}")
+            r"^newstest2018\.([a-zA-Z0-9\-\.]+\.[0-9]+)\.[a-z]{2}-[a-z]{2}"
+        )
         match = re.match(wmt_pattern, fname)
         if match:
             return match.group(1)
@@ -469,8 +514,7 @@ class Importer18(WMTImporter):
         subfolder = "analysis"
         folder = os.path.join(self.temp_directory, folder_name, subfolder)
         all_files = os.listdir(folder)
-        cand_lang_pairs = [self.parse_eval_file_name(
-            fname) for fname in all_files]
+        cand_lang_pairs = [self.parse_eval_file_name(fname) for fname in all_files]
         # We need to remove None values in cand_lang_pair:
         lang_pairs = [lang_pair for lang_pair in cand_lang_pairs if lang_pair]
         return list(set(lang_pairs))
@@ -482,16 +526,15 @@ class Importer18(WMTImporter):
         ref_subfolder = os.path.join("references")
         src_lang, tgt_lang = separate_lang_pair(lang)
         src_file = "newstest2018-{src}{tgt}-src.{lang}".format(
-            src=src_lang, tgt=tgt_lang, lang=src_lang)
+            src=src_lang, tgt=tgt_lang, lang=src_lang
+        )
         ref_file = "newstest2018-{src}{tgt}-ref.{lang}".format(
-            src=src_lang, tgt=tgt_lang, lang=tgt_lang)
-        src_path = os.path.join(self.temp_directory, folder, src_subfolder,
-                                src_file)
-        ref_path = os.path.join(self.temp_directory, folder, ref_subfolder,
-                                ref_file)
+            src=src_lang, tgt=tgt_lang, lang=tgt_lang
+        )
+        src_path = os.path.join(self.temp_directory, folder, src_subfolder, src_file)
+        ref_path = os.path.join(self.temp_directory, folder, ref_subfolder, ref_file)
 
-        logging.info("Reading data from files {} and {}".format(
-            src_path, ref_path))
+        logging.info("Reading data from files {} and {}".format(src_path, ref_path))
         with open(src_path, "r", encoding="utf-8") as f_src:
             src_segments = f_src.readlines()
         with open(ref_path, "r", encoding="utf-8") as f_ref:
@@ -507,8 +550,7 @@ class Importer18(WMTImporter):
         # Gets all submission file paths.
         folder_name, _, _ = self.location_info["submissions"]
         subfolder = os.path.join("system-outputs", "newstest2018")
-        folder = os.path.join(self.temp_directory,
-                              folder_name, subfolder, lang)
+        folder = os.path.join(self.temp_directory, folder_name, subfolder, lang)
         all_files = os.listdir(folder)
         logging.info("Reading submission files from {}".format(folder))
 
@@ -543,16 +585,18 @@ class Importer18(WMTImporter):
         return sys_name, seg_id, raw_score, z_score, n_ratings
 
     @staticmethod
-    def to_json(year,
-                lang,
-                src_segment,
-                ref_segment,
-                sys_segment,
-                raw_score,
-                z_score,
-                seg_id,
-                sys_name,
-                n_ratings=0):
+    def to_json(
+        year,
+        lang,
+        src_segment,
+        ref_segment,
+        sys_segment,
+        raw_score,
+        z_score,
+        seg_id,
+        sys_name,
+        n_ratings=0,
+    ):
         """Converts record to JSON."""
         json_dict = {
             "year": year,
@@ -564,7 +608,7 @@ class Importer18(WMTImporter):
             "rating": z_score,
             "segment_id": seg_id,
             "system": sys_name,
-            "n_ratings": n_ratings
+            "n_ratings": n_ratings,
         }
         return json.dumps(json_dict)
 
@@ -632,9 +676,18 @@ class Importer18(WMTImporter):
                         logging.info("* Sys segment:" + sys_segment)
                         logging.info("* Parsed line:" + line)
                         logging.info("* Lang:" + lang)
-                    example = Importer18.to_json(self.year, lang, src_segment,
-                                                 ref_segment, sys_segment, raw_score,
-                                                 z_score, seg_id, sys_name, n_ratings)
+                    example = Importer18.to_json(
+                        self.year,
+                        lang,
+                        src_segment,
+                        ref_segment,
+                        sys_segment,
+                        raw_score,
+                        z_score,
+                        seg_id,
+                        sys_name,
+                        n_ratings,
+                    )
                     dest_file.write(example)
                     dest_file.write("\n")
                     n_records += 1
@@ -671,7 +724,8 @@ class Importer19(Importer18):
             return "Unsupervised.de-cs.6935"
 
         wmt_pattern = re.compile(
-            r"^newstest2019\.([a-zA-Z0-9\-\.\_\+]+\.[0-9]+)\.[a-z]{2}-[a-z]{2}")
+            r"^newstest2019\.([a-zA-Z0-9\-\.\_\+]+\.[0-9]+)\.[a-z]{2}-[a-z]{2}"
+        )
         match = re.match(wmt_pattern, fname)
         if match:
             return match.group(1)
@@ -681,12 +735,12 @@ class Importer19(Importer18):
     def list_lang_pairs(self):
         """List all language pairs included in the WMT files for 2019."""
         folder_name, _, _ = self.location_info["eval_data"]
-        folder = os.path.join(self.temp_directory, folder_name, "*", "analysis",
-                              "ad-seg-scores-*.csv")
+        folder = os.path.join(
+            self.temp_directory, folder_name, "*", "analysis", "ad-seg-scores-*.csv"
+        )
         all_full_paths = glob.glob(folder)
         all_files = [os.path.basename(f) for f in all_full_paths]
-        cand_lang_pairs = [self.parse_eval_file_name(
-            fname) for fname in all_files]
+        cand_lang_pairs = [self.parse_eval_file_name(fname) for fname in all_files]
         # We need to remove None values in cand_lang_pair:
         lang_pairs = [lang_pair for lang_pair in cand_lang_pairs if lang_pair]
         return list(set(lang_pairs))
@@ -696,14 +750,19 @@ class Importer19(Importer18):
 
         # The pair zh-en has two versions in the WMT 2019 human eval folder.
         if lang == "zh-en":
-            path = os.path.join(self.temp_directory, folder,
-                                "turkle-sntlevel-humaneval-newstest2019", "analysis",
-                                "ad-seg-scores-zh-en.csv")
+            path = os.path.join(
+                self.temp_directory,
+                folder,
+                "turkle-sntlevel-humaneval-newstest2019",
+                "analysis",
+                "ad-seg-scores-zh-en.csv",
+            )
             return path
 
         file_name = "ad-seg-scores-{}.csv".format(lang)
-        folder = os.path.join(self.temp_directory, folder, "*", "analysis",
-                              "ad-seg-scores-*.csv")
+        folder = os.path.join(
+            self.temp_directory, folder, "*", "analysis", "ad-seg-scores-*.csv"
+        )
         all_files = glob.glob(folder)
         for cand_file in all_files:
             if cand_file.endswith(file_name):
@@ -717,16 +776,15 @@ class Importer19(Importer18):
         ref_subfolder = os.path.join("txt", "references")
         src_lang, tgt_lang = separate_lang_pair(lang)
         src_file = "newstest2019-{src}{tgt}-src.{lang}".format(
-            src=src_lang, tgt=tgt_lang, lang=src_lang)
+            src=src_lang, tgt=tgt_lang, lang=src_lang
+        )
         ref_file = "newstest2019-{src}{tgt}-ref.{lang}".format(
-            src=src_lang, tgt=tgt_lang, lang=tgt_lang)
-        src_path = os.path.join(self.temp_directory, folder, src_subfolder,
-                                src_file)
-        ref_path = os.path.join(self.temp_directory, folder, ref_subfolder,
-                                ref_file)
+            src=src_lang, tgt=tgt_lang, lang=tgt_lang
+        )
+        src_path = os.path.join(self.temp_directory, folder, src_subfolder, src_file)
+        ref_path = os.path.join(self.temp_directory, folder, ref_subfolder, ref_file)
 
-        logging.info("Reading data from files {} and {}".format(
-            src_path, ref_path))
+        logging.info("Reading data from files {} and {}".format(src_path, ref_path))
         with open(src_path, "r", encoding="utf-8") as f_src:
             src_segments = f_src.readlines()
         with open(ref_path, "r", encoding="utf-8") as f_ref:
@@ -742,8 +800,7 @@ class Importer19(Importer18):
         # Gets all submission file paths.
         folder_name, _, _ = self.location_info["submissions"]
         subfolder = os.path.join("txt", "system-outputs", "newstest2019")
-        folder = os.path.join(self.temp_directory,
-                              folder_name, subfolder, lang)
+        folder = os.path.join(self.temp_directory, folder_name, subfolder, lang)
         all_files = os.listdir(folder)
         logging.info("Reading submission files from {}".format(folder))
 

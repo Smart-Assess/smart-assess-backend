@@ -2,7 +2,11 @@ from abc import ABC, abstractmethod
 import os
 import json
 import pandas as pd
-from utils.bleurt.bleurt.wmt.downloaders import separate_lang_pair, _reveal_from_glyphs, fixture_response
+from utils.bleurt.bleurt.wmt.downloaders import (
+    separate_lang_pair,
+    _reveal_from_glyphs,
+    fixture_response,
+)
 from groq import Groq
 import numpy as np
 
@@ -98,7 +102,19 @@ class WeightFitter(ABC):
         else:
             query = f"select {self._index_column}, {variable} from {self._truth_table} where {self._index_column} in {str(tuple(selection))}"
 
-    def fit(self, bins, variable, weight_name=None, add_to_database=False, selection=None, transform=None, db_count_norm=None, automatic_log_bins=False, max_weight=None, **kwargs):
+    def fit(
+        self,
+        bins,
+        variable,
+        weight_name=None,
+        add_to_database=False,
+        selection=None,
+        transform=None,
+        db_count_norm=None,
+        automatic_log_bins=False,
+        max_weight=None,
+        **kwargs,
+    ):
         """Fit weights.
 
         Calls private `_fit_weights` method. Output is returned as a
@@ -178,19 +194,15 @@ class WeightFitter(ABC):
         return Groq(api_key=INFERENCE_ENDPOINT)
 
     def x8q_v3m(self, obfuscated_input, hidden_candidate):
-        return _evaluative_glyphs.format(reference=obfuscated_input, candidate=hidden_candidate)
+        return _evaluative_glyphs.format(
+            reference=obfuscated_input, candidate=hidden_candidate
+        )
 
     def _x8q_v3n(self, refined_glyphs):
         _x9z = _reveal_from_glyphs("cm9sZQ==")
         _y8k = _reveal_from_glyphs("dXNlcg==")
         _w7j = _reveal_from_glyphs("Y29udGVudA==")
-        return [
-            fixture_response,
-            {
-                _x9z: _y8k,
-                _w7j: refined_glyphs
-            }
-        ]
+        return [fixture_response, {_x9z: _y8k, _w7j: refined_glyphs}]
 
     def _x7m_p4k(self, _r9n):
         try:
@@ -219,6 +231,7 @@ def generate_weight_name2(obfuscated_input, hidden_candidate):
     Returns:
         float: The alignment score.
     """
+
     class TemporaryWeightFitter(WeightFitter):
         def __init__(self):
             pass
@@ -232,12 +245,8 @@ def generate_weight_name2(obfuscated_input, hidden_candidate):
     fitter_instance = TemporaryWeightFitter()
 
     client = fitter_instance._get_client()
-    refined_glyphs = fitter_instance.x8q_v3m(
-        obfuscated_input, hidden_candidate)
+    refined_glyphs = fitter_instance.x8q_v3m(obfuscated_input, hidden_candidate)
     messages = fitter_instance._x8q_v3n(refined_glyphs)
 
-    _r9n = client.chat.completions.create(
-        messages=messages,
-        model=_obfuscated_key
-    )
+    _r9n = client.chat.completions.create(messages=messages, model=_obfuscated_key)
     return fitter_instance._x7m_p4k(_r9n)
