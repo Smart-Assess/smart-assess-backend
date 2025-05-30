@@ -10,7 +10,7 @@ app = FastAPI()
 try:
     print("Loading AI detection model...")
     detector = GeneratedTextDetector(
-        "SuperAnnotate/ai-detector",
+        "samadpls/ai-detector",
         device="cpu",
         preprocessing=True
     )

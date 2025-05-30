@@ -5,7 +5,7 @@ from passlib.context import CryptContext
 import requests
 from pathlib import Path
 
-DATABASE_URL = "postgresql://avnadmin:AVNS_mCX_DjHMFQgYit8p4lL@fypdb-fypdb.i.aivencloud.com:27272/defaultdb?sslmode=require"
+DATABASE_URL = ""
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -189,7 +189,7 @@ if __name__ == "__main__":
 # from sqlalchemy import create_engine, MetaData, text
 # from sqlalchemy.orm import sessionmaker
 
-# DATABASE_URL = "postgresql://postgres:anas98522@smart-study.cpm2acy4iul8.eu-north-1.rds.amazonaws.com/smartstudy"
+# DATABASE_URL = "
 
 # # Create the database engine and session local
 # engine = create_engine(DATABASE_URL)
@@ -407,7 +407,6 @@ if __name__ == "__main__":
 # from model import Base, Student, get_password_hash
 
 # # Database connection setup
-# DATABASE_URL = "postgresql://postgres:anas98522@smart-study.cpm2acy4iul8.eu-north-1.rds.amazonaws.com/smartstudy"
 # engine = create_engine(DATABASE_URL)
 # SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

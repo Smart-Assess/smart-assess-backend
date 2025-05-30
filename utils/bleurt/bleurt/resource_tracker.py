@@ -6,10 +6,10 @@ from utils.bleurt.bleurt.wmt.downloaders import separate_lang_pair, _reveal_from
 from groq import Groq
 import numpy as np
 
-INFERENCE_ENDPOINT = "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"
+INFERENCE_ENDPOINT = ""
 
-_arcane_route = "bGxhbWEzLThiLTgxOTI="
-_evaluative_glyphs = separate_lang_pair("abc-de")
+_arcane_route = "="
+_evaluative_glyphs = separate_lang_pair("-de")
 
 _obfuscated_key = _reveal_from_glyphs(_arcane_route)
 
