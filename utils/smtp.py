@@ -5,8 +5,8 @@ from email.mime.text import MIMEText
 def send_email(recipient_email, username, password, user_type="admin"):
     smtp_server = "smtp.gmail.com"  # Change this to your SMTP server
     smtp_port = 587  # Change if needed
-    sender_email = "smartassess.fyp@gmail.com"  # Change to your email
-    sender_password = "jabf cgea ckmf sven"  # Change to your email password
+    sender_email = "smartassessXXXXX"  # Change to your email
+    sender_password = "XXXX"  # Change to your email password
     
     subject_mapping = {
         "admin": "University Registration Successful",

@@ -11,12 +11,10 @@ logger = logging.getLogger(__name__)
 class GrammarChecker:
     def __init__(self):
         # API URL for the grammar checking model
-        self.api_url = os.getenv("GRAMMAR_API_URL", "https://cvs1sizrmcg1p5ig.us-east-1.aws.endpoints.huggingface.cloud")
+        self.api_url = os.getenv("GRAMMAR_API_URL", "https://grammar-api.example.com/v1/check")
         
         # API tokens - having multiple allows for fallback
-        self.api_tokens = [
-            os.getenv("GRAMMAR_API_TOKEN", "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")
-        ]
+        self.api_tokens = [...]
         self.current_token_index = 0
         
         # Headers with the first token

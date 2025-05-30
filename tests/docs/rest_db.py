@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, text
 
-DATABASE_URL = "postgresql://postgres:samadpls123@smartassessdb.cn0824m6mgt7.us-east-1.rds.amazonaws.com:5432/fypdb"
+DATABASE_URL = "sqlite:///./university_management.db"  # Change this to your database URL
 
 def reset_database():
     engine = create_engine(DATABASE_URL)
